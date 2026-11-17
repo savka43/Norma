@@ -1,0 +1,59 @@
+name: norma
+
+x-api: &api
+  image: norma-api:local
+  build:
+    context: ./backend
+  environment:
+    NORMA_DATABASE_HOST: postgres
+    NORMA_DATABASE_PORT: 5432
+    NORMA_DATABASE_NAME: ${NORMA_DATABASE_NAME:-norma}
+    NORMA_DATABASE_USER: ${NORMA_DATABASE_USER:-norma}
+    NORMA_DATABASE_PASSWORD: ${NORMA_DATABASE_PASSWORD:?Set NORMA_DATABASE_PASSWORD in .env}
+    NORMA_DATABASE_CONNECT_TIMEOUT_SECONDS: ${NORMA_DATABASE_CONNECT_TIMEOUT_SECONDS:-5}
+    NORMA_READINESS_TIMEOUT_SECONDS: ${NORMA_READINESS_TIMEOUT_SECONDS:-3}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${NORMA_DATABASE_NAME:-norma}
+      POSTGRES_USER: ${NORMA_DATABASE_USER:-norma}
+      POSTGRES_PASSWORD: ${NORMA_DATABASE_PASSWORD:?Set NORMA_DATABASE_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:${NORMA_DATABASE_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  migrate:
+    <<: *api
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  backend:
+    <<: *api
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health/ready', timeout=5).close()"
+      interval: 5s
+      timeout: 6s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  postgres_data:
