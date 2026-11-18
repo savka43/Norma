@@ -30,7 +30,7 @@ def client(settings: Settings) -> Iterator[TestClient]:
         yield test_client
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def integration_settings() -> Settings:
     if os.environ.get("NORMA_RUN_DB_TESTS") != "1":
         pytest.skip("Set NORMA_RUN_DB_TESTS=1 with a dedicated PostgreSQL test database")

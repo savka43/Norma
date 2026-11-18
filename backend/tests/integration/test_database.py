@@ -1,8 +1,4 @@
 import asyncio
-import os
-import subprocess
-import sys
-from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -12,9 +8,9 @@ from sqlalchemy import text
 from app.core.config import Settings
 from app.core.database import create_engine
 from app.main import create_app
+from tests.integration.alembic_helpers import run_alembic
 
 pytestmark = pytest.mark.integration
-BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_readiness_with_real_postgresql(integration_settings: Settings) -> None:
@@ -35,38 +31,30 @@ def test_readiness_with_invalid_database_credentials(integration_settings: Setti
 
 
 def test_migration_round_trip(integration_settings: Settings) -> None:
-    environment = dict(os.environ)
-    environment.update(
-        NORMA_DATABASE_HOST=integration_settings.database_host,
-        NORMA_DATABASE_PORT=str(integration_settings.database_port),
-        NORMA_DATABASE_NAME=integration_settings.database_name,
-        NORMA_DATABASE_USER=integration_settings.database_user,
-        NORMA_DATABASE_PASSWORD=integration_settings.database_password.get_secret_value(),
-    )
-
-    def alembic(*arguments: str) -> None:
-        result = subprocess.run(
-            [sys.executable, "-m", "alembic", *arguments],
-            cwd=BACKEND_ROOT,
-            env=environment,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
-
-    async def current_revision() -> str | None:
+    async def database_state() -> tuple[str | None, bool, list[str]]:
         engine = create_engine(integration_settings)
         try:
             async with engine.connect() as connection:
-                return await connection.scalar(text("SELECT version_num FROM alembic_version"))
+                revision = await connection.scalar(text("SELECT version_num FROM alembic_version"))
+                users_exist = await connection.scalar(text("SELECT to_regclass('public.users')"))
+                roles = await connection.scalars(
+                    text(
+                        "SELECT enumlabel FROM pg_enum "
+                        "JOIN pg_type ON pg_enum.enumtypid = pg_type.oid "
+                        "WHERE typname = 'user_role' ORDER BY enumsortorder"
+                    )
+                )
+                return revision, users_exist is not None, list(roles)
         finally:
             await engine.dispose()
 
-    alembic("upgrade", "head")
-    assert asyncio.run(current_revision()) == "0001_api_foundation"
-    alembic("check")
-    alembic("downgrade", "base")
-    assert asyncio.run(current_revision()) is None
-    alembic("upgrade", "head")
+    run_alembic(integration_settings, "upgrade", "head")
+    assert asyncio.run(database_state()) == ("0002_users", True, ["student", "supervisor"])
+    run_alembic(integration_settings, "check")
+    run_alembic(integration_settings, "downgrade", "0001_api_foundation")
+    assert asyncio.run(database_state()) == ("0001_api_foundation", False, [])
+    run_alembic(integration_settings, "upgrade", "head")
+    run_alembic(integration_settings, "downgrade", "base")
+    assert asyncio.run(database_state()) == (None, False, [])
+    run_alembic(integration_settings, "upgrade", "head")
+    run_alembic(integration_settings, "check")
