@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     database_password: SecretStr = Field(min_length=1)
     database_connect_timeout_seconds: float = Field(default=5, gt=0, le=60)
     readiness_timeout_seconds: float = Field(default=3, gt=0, le=60)
+    session_lifetime_seconds: int = Field(default=28800, ge=60, le=2592000)
+    session_cookie_secure: bool = False
 
     @property
     def database_url(self) -> URL:

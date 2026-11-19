@@ -178,7 +178,8 @@ UI → POST check → DB job/status → worker (SOAP/WSDL)
 - Docker Compose: backend, frontend, postgres, worker, file storage при необходимости.
 - Студент регистрируется самостоятельно, руководитель добавляет его в свою группу.
   Технический bootstrap руководителя не создаёт третью бизнес-роль.
-  Для auth реализовать минимальный безопасный вариант с документированным решением о session/cookie.
+  Реализованы Argon2id, отзываемые серверные cookie-сессии и CLI bootstrap;
+  решение и ограничения — [ADR-007](../decisions/ADR-007-auth-sessions-bootstrap.md).
 
 ## 7. Тестирование
 
