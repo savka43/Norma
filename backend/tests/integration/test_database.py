@@ -31,14 +31,17 @@ def test_readiness_with_invalid_database_credentials(integration_settings: Setti
 
 
 def test_migration_round_trip(integration_settings: Settings) -> None:
-    async def database_state() -> tuple[str | None, bool, bool, list[str]]:
+    async def database_state() -> tuple[str | None, set[str], list[str]]:
         engine = create_engine(integration_settings)
         try:
             async with engine.connect() as connection:
                 revision = await connection.scalar(text("SELECT version_num FROM alembic_version"))
-                users_exist = await connection.scalar(text("SELECT to_regclass('public.users')"))
-                sessions_exist = await connection.scalar(
-                    text("SELECT to_regclass('public.auth_sessions')")
+                tables = await connection.scalars(
+                    text(
+                        "SELECT tablename FROM pg_tables WHERE schemaname = 'public' "
+                        "AND tablename IN ('users', 'auth_sessions', "
+                        "'supervisor_groups', 'group_memberships')"
+                    )
                 )
                 roles = await connection.scalars(
                     text(
@@ -47,25 +50,31 @@ def test_migration_round_trip(integration_settings: Settings) -> None:
                         "WHERE typname = 'user_role' ORDER BY enumsortorder"
                     )
                 )
-                return revision, users_exist is not None, sessions_exist is not None, list(roles)
+                return revision, set(tables), list(roles)
         finally:
             await engine.dispose()
 
     run_alembic(integration_settings, "upgrade", "head")
     assert asyncio.run(database_state()) == (
-        "0003_auth_sessions",
-        True,
-        True,
+        "0004_supervisor_groups",
+        {"users", "auth_sessions", "supervisor_groups", "group_memberships"},
         ["student", "supervisor"],
     )
     run_alembic(integration_settings, "check")
+    run_alembic(integration_settings, "downgrade", "0003_auth_sessions")
+    assert asyncio.run(database_state()) == (
+        "0003_auth_sessions",
+        {"users", "auth_sessions"},
+        ["student", "supervisor"],
+    )
+    run_alembic(integration_settings, "upgrade", "head")
     run_alembic(integration_settings, "downgrade", "0002_users")
-    assert asyncio.run(database_state()) == ("0002_users", True, False, ["student", "supervisor"])
+    assert asyncio.run(database_state()) == ("0002_users", {"users"}, ["student", "supervisor"])
     run_alembic(integration_settings, "upgrade", "head")
     run_alembic(integration_settings, "downgrade", "0001_api_foundation")
-    assert asyncio.run(database_state()) == ("0001_api_foundation", False, False, [])
+    assert asyncio.run(database_state()) == ("0001_api_foundation", set(), [])
     run_alembic(integration_settings, "upgrade", "head")
     run_alembic(integration_settings, "downgrade", "base")
-    assert asyncio.run(database_state()) == (None, False, False, [])
+    assert asyncio.run(database_state()) == (None, set(), [])
     run_alembic(integration_settings, "upgrade", "head")
     run_alembic(integration_settings, "check")
