@@ -41,7 +41,9 @@ def test_migration_round_trip(integration_settings: Settings) -> None:
                         "SELECT tablename FROM pg_tables WHERE schemaname = 'public' "
                         "AND tablename IN ('users', 'auth_sessions', "
                         "'supervisor_groups', 'group_memberships', "
-                        "'theses', 'thesis_stages', 'stage_events')"
+                        "'theses', 'thesis_stages', 'stage_events', "
+                        "'documents', 'document_edit_leases', 'document_versions', "
+                        "'formatting_templates', 'formatting_template_versions')"
                     )
                 )
                 roles = await connection.scalars(
@@ -57,6 +59,26 @@ def test_migration_round_trip(integration_settings: Settings) -> None:
 
     run_alembic(integration_settings, "upgrade", "head")
     assert asyncio.run(database_state()) == (
+        "0006_documents",
+        {
+            "users",
+            "auth_sessions",
+            "supervisor_groups",
+            "group_memberships",
+            "theses",
+            "thesis_stages",
+            "stage_events",
+            "documents",
+            "document_edit_leases",
+            "document_versions",
+            "formatting_templates",
+            "formatting_template_versions",
+        },
+        ["student", "supervisor"],
+    )
+    run_alembic(integration_settings, "check")
+    run_alembic(integration_settings, "downgrade", "0005_theses_stages")
+    assert asyncio.run(database_state()) == (
         "0005_theses_stages",
         {
             "users",
@@ -69,7 +91,7 @@ def test_migration_round_trip(integration_settings: Settings) -> None:
         },
         ["student", "supervisor"],
     )
-    run_alembic(integration_settings, "check")
+    run_alembic(integration_settings, "upgrade", "head")
     run_alembic(integration_settings, "downgrade", "0004_supervisor_groups")
     assert asyncio.run(database_state()) == (
         "0004_supervisor_groups",

@@ -8,6 +8,8 @@ PostgreSQL, SQLAlchemy async, Alembic, конфигурация и healthcheck.
 login/logout/me, серверные сессии и CLI bootstrap руководителя, группы и их права,
 поиск свободных зарегистрированных студентов. Первый backend-инкремент фазы 3
 добавляет ВКР, настройку обязательных этапов/сроков, историю плана и сводку прогресса.
+Backend-инкремент фазы 4 добавляет документы, аренду редактирования, сохранение
+с ревизиями, неизменяемые контрольные версии/восстановление и версии шаблонов.
 Корневая `src/` пока содержит исходную заготовку Vite/React.
 
 ## Запуск API в Docker
@@ -87,7 +89,9 @@ uv run alembic check
 `uv run alembic upgrade head` применяет все ревизии;
 `0004_supervisor_groups` создаёт группы руководителей и уникальные назначения студентов.
 `0005_theses_stages` добавляет ВКР, этапы, enum состояний и историю настройки плана.
-`uv run alembic current` показывает `0005_theses_stages (head)`.
+`0006_documents` добавляет документы, аренды, контрольные версии и шаблоны;
+триггеры PostgreSQL запрещают UPDATE контрольных версий и снимков параметров.
+`uv run alembic current` показывает `0006_documents (head)`.
 Приложение не вызывает `create_all` и не запускает миграции при каждом HTTP-запросе.
 
 Учётная запись содержит ФИО, email, хэш пароля Argon2id и явную роль
@@ -204,6 +208,80 @@ docker compose exec backend python -m app.bootstrap --email supervisor@example.c
 метаданных ВКР, frontend и история решений проверки пока не реализованы.
 Техническое решение — [ADR-009](decisions/ADR-009-thesis-stage-planning.md).
 
+## Документы и версии
+
+Сначала руководитель своей учётной записью создаёт шаблон через
+`POST /api/v1/formatting-templates` с CSRF-заголовком: `{name, parameters}`.
+Параметры задаются явно, см. OpenAPI. Такой пример JSON можно получить из корня
+репозитория (это демонстрационные параметры, не утверждение соответствия ГОСТ):
+
+```bash
+python3 - <<'PY'
+import json
+style = {"font_family": "Times New Roman", "font_size_pt": 14, "line_spacing": 1.5,
+         "first_line_indent_mm": 12.5, "space_before_pt": 0, "space_after_pt": 0,
+         "alignment": "justify", "bold": False, "italic": False}
+parameters = {"schema_version": 1, "page_format": "A4", "orientation": "portrait",
+              "margins": {"top_mm": 20, "bottom_mm": 20, "left_mm": 30, "right_mm": 15},
+              "body": style, "headings": [{**style, "bold": True} for _ in range(6)],
+              "caption": style, "list": style, "table": style, "page_number_start": 1}
+print(json.dumps({"name": "Пример A4", "parameters": parameters}, ensure_ascii=False, indent=2))
+PY
+```
+
+Ответ `201` содержит `template` и `version`; сохраните `version.id`.
+`POST /api/v1/formatting-templates/{template_id}/versions` с
+`{expected_version, parameters}` создаёт новый снимок, не изменяя прежний.
+`GET /api/v1/formatting-templates` и `GET /api/v1/formatting-templates/{template_id}/versions`
+доступны владельцу и студентам его групп; `GET /api/v1/formatting-template-versions/{version_id}`
+читает конкретный снимок. Свободный студент получает пустой список шаблонов.
+
+Далее войдите **студентом** своей ВКР:
+
+1. `POST /api/v1/theses/{thesis_id}/document` с `{"template_version_id":"UUID версии"}`
+   создаёт документ с пустым абзацем и `revision: 1`; повтор — `409`.
+   `GET /api/v1/theses/{thesis_id}/document` и `GET /api/v1/documents/{document_id}`
+   только читают существующий документ.
+2. `POST /api/v1/documents/{document_id}/edit-lease` без тела возвращает `lease_id`
+   и `expires_at`. До истечения аренды продлевайте её через
+   `POST /api/v1/documents/{document_id}/edit-lease/renew` с `X-Edit-Lease: UUID`.
+   TTL — `NORMA_DOCUMENT_LEASE_SECONDS` (по умолчанию 120 секунд, диапазон 30–3600).
+3. `PUT /api/v1/documents/{document_id}` с заголовками `X-CSRF-Protection: 1`,
+   `X-Edit-Lease: UUID` и `{expected_revision, schema_version: 1, content, template_version_id}`
+   сохраняет JSON и возвращает новую ревизию. Нельзя подставлять новую ревизию
+   к старому запросу без разрешения конфликта; при `409` сохраните локальный текст.
+4. `POST /api/v1/documents/{document_id}/versions` с теми же заголовками и
+   `{expected_revision, comment?}` создаёт контрольный снимок. GET списка версий
+   поддерживает `limit`/`offset`; `GET /api/v1/document-versions/{version_id}` читает текст.
+5. `POST /api/v1/documents/{document_id}/restore` с теми же заголовками и
+   `{expected_revision, version_id, comment?}` заменяет рабочий текст/шаблон
+   снимком **этого** документа и создаёт новую контрольную версию со ссылкой на источник.
+   Текущий неснятый в версию черновик автоматически не архивируется.
+6. `DELETE /api/v1/documents/{document_id}/edit-lease` с двумя заголовками
+   освобождает аренду (`204`). Старый UUID не может освободить новую аренду.
+
+Сохранение/снимки/восстановление требуют текущую аренду и ревизию; конфликты — `409`.
+Чтение доступно также руководителю этой ВКР, изменение — только студенту.
+История текста и параметров сохраняется при дальнейших изменениях.
+Клиент хранит один Lexical JSON, а не отдельный текст для каждой страницы.
+Текущая схема поддерживает абзацы, заголовки, цитаты, базовое выделение, переносы
+строк и вложенные списки; неизвестные узлы/inline CSS/таблицы/изображения — `422`.
+Импорт DOCX, экспорт, diff и frontend/A4 появятся в следующих задачах.
+Подробности — [ADR-010](decisions/ADR-010-document-storage-versions-leases.md).
+
+### Проверочная фикстура Lexical
+
+`backend/tests/fixtures/lexical-0.53.0.json` получен настоящим headless-редактором,
+затем прочитан обратно им же; Python и API проверяют сохранение той же структуры.
+Для повторного создания из корня (Node.js/npm нужны только этому tooling):
+
+```bash
+npm install --prefix /tmp/norma-lexical-qa --no-save --ignore-scripts --package-lock=false lexical@0.53.0 @lexical/headless@0.53.0 @lexical/rich-text@0.53.0 @lexical/list@0.53.0
+node backend/tests/fixtures/generate_lexical.cjs /tmp/norma-lexical-qa backend/tests/fixtures/lexical-0.53.0.json
+```
+
+В backend runtime пакеты npm не нужны; обычный pytest использует готовую фикстуру.
+
 ## Проверки backend
 
 Из `backend/`:
@@ -221,6 +299,9 @@ uv run pytest -m "not integration"
 auth-сценарии, истечение/отзыв/ротацию сессий и bootstrap руководителя,
 группы, чужой доступ, поиск и конкурентное добавление студента,
 ВКР, настройку этапов, историю, прогресс и конкурентные изменения плана.
+Дополнительно проверяются JSON-схемы документов/параметров, аренда/истечение,
+сохранение, снимки/восстановление, запрет UPDATE снимков и шесть сценариев гонок
+на независимых соединениях PostgreSQL.
 Создайте отдельную тестовую БД один раз (из корня репозитория):
 
 ```bash

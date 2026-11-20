@@ -129,6 +129,68 @@ GET используют `Cache-Control: no-store`.
 на неизменяемую версию документа (фазы 4/6). Текущая история — история настройки,
 не решения по проверке. Подробности — [ADR-009](../decisions/ADR-009-thesis-stage-planning.md).
 
+## Реализованные документы и шаблоны (backend-инкремент фазы 4)
+
+Все пути под `/api/v1`. Чтение документа/контрольных версий — только студенту
+своей ВКР и её руководителю; изменения — только студенту своей ВКР (`403`
+руководителю). Чужая/отсутствующая сущность — `404`, без сессии — `401`.
+Для мутаций требуется `X-CSRF-Protection: 1`; документы возвращают `no-store`.
+
+| Метод / путь | Запрос и результат |
+|---|---|
+| `POST /theses/{thesis_id}/document` | `{template_version_id}` → `201 DocumentResponse`; пустой абзац, ревизия 1; повтор → `409` |
+| `GET /theses/{thesis_id}/document`, `GET /documents/{document_id}` | `200 DocumentResponse`, GET ничего не создаёт |
+| `PUT /documents/{document_id}` | `{content, schema_version: 1, template_version_id, expected_revision}` + `X-Edit-Lease` → `200 DocumentResponse`, ревизия +1 |
+| `POST /documents/{document_id}/edit-lease` | Без тела → `201 LeaseResponse`; действующая аренда → `409`, даже в другой вкладке того же студента |
+| `POST /documents/{document_id}/edit-lease/renew` | `X-Edit-Lease` → `200 LeaseResponse`; истёкшая/чужая/старая аренда → `409` |
+| `DELETE /documents/{document_id}/edit-lease` | `X-Edit-Lease` → `204`; старый UUID не освобождает новую аренду (`409`) |
+| `POST /documents/{document_id}/versions` | `{expected_revision, comment?}` + `X-Edit-Lease` → `201 VersionResponse`, снимок рабочего документа |
+| `GET /documents/{document_id}/versions` | `{items: VersionSummary[], limit, offset}`; порядок номеров по убыванию, без полного текста в списке |
+| `GET /document-versions/{version_id}` | `200 VersionResponse` с неизменяемым JSON |
+| `POST /documents/{document_id}/restore` | `{version_id, expected_revision, comment?}` + `X-Edit-Lease` → `200 {document, version}`; ревизия +1, новая версия из снимка этого документа |
+| `POST /formatting-templates` | Только руководитель; `{name, parameters}` → `201 {template, version}` с первой версией |
+| `GET /formatting-templates` | Свои шаблоны руководителя / шаблоны руководителя группы студента → `{items, limit, offset}` |
+| `POST /formatting-templates/{template_id}/versions` | Только владелец; `{expected_version, parameters}` → `201 TemplateVersionResponse`; конфликт → `409` |
+| `GET /formatting-templates/{template_id}/versions` | Доступные версии → `{items, limit, offset}`, номера по убыванию |
+| `GET /formatting-template-versions/{version_id}` | Версия параметров по ссылке из документа/снимка; чужая/отсутствующая → `404` |
+
+`DocumentResponse`: `id`, `thesis_id`, `content`, `schema_version`, `revision`,
+`last_version_number`, `template_version_id`, `created_at`, `updated_at`.
+`LeaseResponse`: `document_id`, `lease_id`, `holder_id`, `acquired_at`, `expires_at`.
+`X-Edit-Lease` — UUID из ответа выдачи/продления. Отсутствие/невалидный UUID — `422`;
+корректный UUID отсутствующей/истёкшей/заменённой аренды — `409`.
+TTL по умолчанию 120 секунд, настраивается; save не продлевает его автоматически.
+После истечения новую аренду нужно получить явно. GET документа не раскрывает UUID аренды.
+
+`VersionSummary`: `id`, `document_id`, `number`, `document_revision`,
+`schema_version`, `template_version_id`, `created_by_id`, `comment`,
+`restored_from_id`, `created_at`. `VersionResponse` дополнительно содержит `content`.
+Снимок не увеличивает ревизию текста, номера версий выдаются последовательно.
+Два параллельных запроса снимка могут создать две самостоятельные версии одного текста.
+Восстановление создаёт новую версию, исходные остаются неизменными; рабочий черновик
+заменяется явно, его автоматического дополнительного архивирования перед restore нет.
+Устаревшая ревизия/аренда при save/snapshot/restore даёт `409` без записи.
+
+`content` — строгая схема Lexical v1: root/paragraph/heading/quote/list/listitem/text/linebreak,
+вложенные списки, штатные флаги выделения, пустой inline CSS. Корень не пустой.
+Неизвестные узлы, версии или поля, таблицы/изображения/HTML пока дают `422`,
+никакое содержимое не отбрасывается молча. Лимит содержимого — 2 MiB компактного UTF-8
+JSON, 50 000 объектов, 64 уровня JSON. Точные поля — в OpenAPI, ограничения — ADR-010.
+
+`TemplateResponse`: `id`, `supervisor_id`, `name`, `latest_version`, `created_at`.
+`TemplateVersionResponse`: `id`, `template_id`, `number`, `parameters`, `created_at`.
+Параметры задаются явно: schema v1, A4, ориентация, поля в мм, стили body/headings
+(6 уровней)/caption/list/table, начало нумерации. Стиль задаёт шрифт, размер в pt,
+интервалы, отступ, выравнивание и bold/italic. Выбирать в документ можно только
+версию шаблона руководителя этой ВКР. Свободному студенту список шаблонов пуст.
+ГОСТ-предустановка и фактическое применение оформления ещё не реализованы.
+
+Списки шаблонов/версий: `limit=50` (1–100), `offset=0` (0..2^63−1).
+Шаблоны сортируются по созданию/UUID по убыванию, их версии — номер по убыванию.
+Неизвестные поля запросов запрещены. Обновления/удаления снимков через API нет;
+UPDATE обеих таблиц версий также отвергается триггером PostgreSQL.
+Подробности — [ADR-010](../decisions/ADR-010-document-storage-versions-leases.md).
+
 ## Планируемые бизнес-маршруты
 
 | Модуль | Метод / путь | Сценарий |
@@ -137,17 +199,10 @@ GET используют `Cache-Control: no-store`.
 | stages | `POST /stages/{id}/request-changes` | `in_review → changes_requested`, комментарии остаются в истории |
 | stages | `POST /stages/{id}/confirm` | `in_review → completed`, только руководитель |
 | stages | Расширение `GET /stages/{id}/history` | История отправок и решений вместе с версиями документа |
-| documents | `GET /theses/{id}/document` | Lexical JSON + revision + template |
-| documents | `PUT /documents/{id}` | Autosave, `expected_revision`, lease |
-| documents | `POST /documents/{id}/edit-lease`, `/edit-lease/renew`, `DELETE /documents/{id}/edit-lease` | Последовательный редактор |
 | documents | `POST /documents/{id}/import` | UC-01: DOCX → Lexical + warnings; оригинал сохраняется |
-| documents | `GET/POST /documents/{id}/versions` | История/контрольные версии |
-| documents | `GET /document-versions/{id}` | Снимок без изменения |
 | documents | `GET /documents/{id}/diff?base={version_id}&target={version_id}` | UC-06, подсветка added/removed/changed |
 | comments | `GET /document-versions/{id}/comments?include_resolved=false` | Замечания с фильтрацией |
 | comments | `POST /document-versions/{id}/comments`, `PATCH /comments/{id}` | UC-10, статус/цитата/anchor |
-| formatting | `GET/POST /formatting-templates` | Шаблоны оформления |
-| formatting | `GET /formatting-templates/{id}/versions` | История неизменяемых параметров |
 | formatting | `POST /document-versions/{id}/format-check` | Проверка по snapshot шаблона |
 | formatting | `POST /document-versions/{id}/exports` | UC-02, DOCX/PDF |
 | plagiarism | `POST /document-versions/{id}/plagiarism-checks` | UC-03, создать долговечное задание |
@@ -162,4 +217,4 @@ GET используют `Cache-Control: no-store`.
 - Сохранённые версии immutable; получение diff не меняет их. Отправка этапа связывает `stage_id`, `submitted_version_id`, актёра и время.
 - Вызовы API «Антиплагиат» выполняются долговечным worker; `POST` не ждёт синхронного процента. Повторы после ошибки вручную.
 - Лимиты API и поддерживаемые виды отчётов неизвестны для конкретного тестового аккаунта: не выдумывать числа.
-- Тела будущих бизнес-запросов/ответов уточняются при реализации и покрываются интеграционными тестами; реализованные auth, health, группы, поиск, ВКР и настройка этапов описаны выше.
+- Тела будущих бизнес-запросов/ответов уточняются при реализации и покрываются интеграционными тестами; реализованные auth, health, группы, ВКР, этапы, документы и версии шаблонов описаны выше.

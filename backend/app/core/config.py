@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     readiness_timeout_seconds: float = Field(default=3, gt=0, le=60)
     session_lifetime_seconds: int = Field(default=28800, ge=60, le=2592000)
     session_cookie_secure: bool = False
+    document_lease_seconds: int = Field(default=120, ge=30, le=3600)
 
     @property
     def database_url(self) -> URL:

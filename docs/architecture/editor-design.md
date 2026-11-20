@@ -1,6 +1,7 @@
 # Технический дизайн редактора на Lexical
 
-**Статус:** целевая архитектура с проверяемыми рисками, не описание уже работающего кода.
+**Статус:** целевая архитектура с проверяемыми рисками. Реализован backend хранения,
+ревизий, lease и контрольных версий (ADR-010); frontend/layout ниже ещё не реализованы.
 Сверяться с `docs/requirements/editor.md` и ADR-001.
 
 ## Компоненты
@@ -29,6 +30,15 @@ frontend/src/features/document-editor/
 ```
 
 Данные и логика редактора не должны расползаться по `pages/`. `shared/ui` не зависит от Lexical.
+
+Текущий backend принимает schema v1: paragraph/heading/quote/list/listitem/text/linebreak.
+Клиент должен использовать это проверенное подмножество до расширения схемы;
+неизвестные узлы и inline CSS отклоняются явно. Таблицы/изображения/custom nodes
+нужно добавить вместе с валидатором и проверками, не считать их уже поддержанными.
+На fixture `@lexical/headless` 0.53.0 проверены экспорт/чтение и HTTP/JSONB round-trip.
+Для чтения выбранных параметров есть `GET /formatting-template-versions/{version_id}`.
+Точный API, аренда и восстановление — [API-контракт](api-contract.md) и
+[ADR-010](../decisions/ADR-010-document-storage-versions-leases.md).
 
 ## Источник данных и пагинация
 
