@@ -76,17 +76,67 @@ Cookie `norma_session` — host-only, `HttpOnly`, `SameSite=Lax`, `Path=/api/v1`
 не меняет его исходную группу. Удаление и перенос пока не реализованы.
 Техническое решение — [ADR-008](../decisions/ADR-008-supervisor-groups.md).
 
+## Реализованные ВКР и настройка этапов (первый backend-инкремент фазы 3)
+
+Префикс `/api/v1`, cookie-сессии и CSRF — как выше. Студент читает только свою
+ВКР/этапы/историю; руководитель — назначенные ему ВКР. Чужая и отсутствующая
+сущность одинаково дают `404`. Изменения требуют руководителя (`403` студенту).
+
+| Метод / путь | Запрос и результат |
+|---|---|
+| `POST /theses` | `{student_id, title, start_date, due_date}` → `201 ThesisResponse`; только студент своей группы; недоступный/свободный → `404`, ВКР уже есть → `409` |
+| `GET /theses` | Только доступные ВКР → `{items, limit, offset}` |
+| `GET /theses/{thesis_id}` | Метаданные, ревизия плана и вычисленный прогресс → `ThesisResponse` |
+| `GET /theses/{thesis_id}/stages` | Весь упорядоченный план → `{items: StageResponse[], revision, as_of_date}` |
+| `POST /theses/{thesis_id}/stages` | `{name, position, due_date, expected_revision}` → `201`, весь обновлённый план с ревизией |
+| `PATCH /stages/{stage_id}` | Те же обязательные поля → `200`, весь обновлённый план с ревизией; UUID этапа сохраняется |
+| `GET /stages/{stage_id}/history` | История настройки этапа → `{items, limit, offset}` |
+| `GET /supervisor-groups/{group_id}/progress` | Только руководитель своей группы → `{items: [{student, thesis, stages}], limit, offset, as_of_date}` |
+
+`ThesisResponse`: `id`, `student_id`, `supervisor_id`, `title`, `start_date`,
+`due_date`, `revision`, `created_at`, `total_stages`, `completed_stages`,
+`progress_percent`, `overdue_stages`, `is_overdue`, `as_of_date`.
+Тема — 1–500 символов после обрезки краёв; общий срок не раньше начала.
+Владелец — из сессии, одна ВКР на студента, ревизия нового плана — 1.
+Отдельного общего статуса ВКР и изменения её метаданных пока нет.
+
+`StageResponse`: `id`, `thesis_id`, `name`, `position`, `due_date`, `status`,
+`created_at`, `is_overdue`. Имя — 1–255 символов после обрезки краёв.
+Позиции — целые `1..N`, при вставке допускается `N+1`; перенос/вставка атомарно
+сдвигает остальные позиции. Срок этапа входит в интервал дат ВКР включительно.
+Все этапы обязательны, начальный статус — `in_progress`. Передать `status`,
+`weight`, `required` или иные посторонние поля нельзя (`422`).
+
+Изменение получает текущую `expected_revision` ВКР; устаревшая ревизия — `409`
+без перезаписи. Фактическая правка увеличивает ревизию на 1; актуальный PATCH
+без изменений её сохраняет. При наличии этапа `in_review` или `completed`
+настройка всего плана временно закрыта (`409`); удаление этапов не реализовано.
+История содержит `id`, `stage_id`, `actor_id`, `thesis_revision`, `kind`
+(`created|updated`), `before`, `after`, `created_at`; снимки содержат имя,
+позицию, срок и статус. История включает сдвиги соседних этапов при перестановке.
+
+Прогресс — `100 * completed / total`; если этапов нет, `progress_percent: null`.
+Просрочка — дата срока строго раньше `as_of_date` (текущая дата UTC), завершённые
+этапы исключены. `is_overdue` ВКР сравнивает её общий срок с той же датой, пока
+не завершены все этапы. Нулевой план не считается завершением.
+Сводка включает студентов без ВКР (`thesis: null`, `stages: []`).
+План возвращается целиком; списки ВКР, студентов в сводке и событий истории:
+`limit=50` (1–100), `offset=0` (0..2^63−1). ВКР — создание/UUID по убыванию,
+сводка — ФИО/UUID по возрастанию, история — ревизия по возрастанию.
+GET используют `Cache-Control: no-store`.
+
+Отправка, возврат и подтверждение пока **не реализованы**: они должны ссылаться
+на неизменяемую версию документа (фазы 4/6). Текущая история — история настройки,
+не решения по проверке. Подробности — [ADR-009](../decisions/ADR-009-thesis-stage-planning.md).
+
 ## Планируемые бизнес-маршруты
 
 | Модуль | Метод / путь | Сценарий |
 |---|---|---|
-| theses | `GET /theses`, `GET /theses/{id}` | ВКР / доступ по роли |
-| stages | `GET/POST /theses/{id}/stages`, `PATCH /stages/{id}` | UC-08, сроки и порядок |
 | stages | `POST /stages/{id}/submit` | `in_progress/changes_requested → in_review`, immutable `DocumentVersion` |
 | stages | `POST /stages/{id}/request-changes` | `in_review → changes_requested`, комментарии остаются в истории |
 | stages | `POST /stages/{id}/confirm` | `in_review → completed`, только руководитель |
-| stages | `GET /stages/{id}/history` | История отправок и решений |
-| stages | `GET /supervisor-groups/{id}/progress` | UC-12, completed/total |
+| stages | Расширение `GET /stages/{id}/history` | История отправок и решений вместе с версиями документа |
 | documents | `GET /theses/{id}/document` | Lexical JSON + revision + template |
 | documents | `PUT /documents/{id}` | Autosave, `expected_revision`, lease |
 | documents | `POST /documents/{id}/edit-lease`, `/edit-lease/renew`, `DELETE /documents/{id}/edit-lease` | Последовательный редактор |
@@ -112,4 +162,4 @@ Cookie `norma_session` — host-only, `HttpOnly`, `SameSite=Lax`, `Path=/api/v1`
 - Сохранённые версии immutable; получение diff не меняет их. Отправка этапа связывает `stage_id`, `submitted_version_id`, актёра и время.
 - Вызовы API «Антиплагиат» выполняются долговечным worker; `POST` не ждёт синхронного процента. Повторы после ошибки вручную.
 - Лимиты API и поддерживаемые виды отчётов неизвестны для конкретного тестового аккаунта: не выдумывать числа.
-- Тела будущих бизнес-запросов/ответов уточняются при реализации и покрываются интеграционными тестами; auth, health, группы и поиск описаны выше как реализованные.
+- Тела будущих бизнес-запросов/ответов уточняются при реализации и покрываются интеграционными тестами; реализованные auth, health, группы, поиск, ВКР и настройка этапов описаны выше.
