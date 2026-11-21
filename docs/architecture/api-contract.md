@@ -140,7 +140,7 @@ GET используют `Cache-Control: no-store`.
 |---|---|
 | `POST /theses/{thesis_id}/document` | `{template_version_id}` → `201 DocumentResponse`; пустой абзац, ревизия 1; повтор → `409` |
 | `GET /theses/{thesis_id}/document`, `GET /documents/{document_id}` | `200 DocumentResponse`, GET ничего не создаёт |
-| `PUT /documents/{document_id}` | `{content, schema_version: 1, template_version_id, expected_revision}` + `X-Edit-Lease` → `200 DocumentResponse`, ревизия +1 |
+| `PUT /documents/{document_id}` | `{content, schema_version, template_version_id, expected_revision}` + `X-Edit-Lease` → `200 DocumentResponse`, ревизия +1 |
 | `POST /documents/{document_id}/edit-lease` | Без тела → `201 LeaseResponse`; действующая аренда → `409`, даже в другой вкладке того же студента |
 | `POST /documents/{document_id}/edit-lease/renew` | `X-Edit-Lease` → `200 LeaseResponse`; истёкшая/чужая/старая аренда → `409` |
 | `DELETE /documents/{document_id}/edit-lease` | `X-Edit-Lease` → `204`; старый UUID не освобождает новую аренду (`409`) |
@@ -171,9 +171,11 @@ TTL по умолчанию 120 секунд, настраивается; save �
 заменяется явно, его автоматического дополнительного архивирования перед restore нет.
 Устаревшая ревизия/аренда при save/snapshot/restore даёт `409` без записи.
 
-`content` — строгая схема Lexical v1: root/paragraph/heading/quote/list/listitem/text/linebreak,
-вложенные списки, штатные флаги выделения, пустой inline CSS. Корень не пустой.
-Неизвестные узлы, версии или поля, таблицы/изображения/HTML пока дают `422`,
+`content` — строгая схема Lexical: v1 принимает root/paragraph/heading/quote/list/listitem/text/linebreak,
+вложенные списки, штатные флаги выделения, пустой inline CSS. V2 дополнительно
+принимает table/tablerow/tablecell и norma-image (см. импорт ниже); выдавать их за v1
+нельзя (`422`). Старые v1-снимки не меняются. Корень не пустой.
+Неизвестные узлы, версии или поля, произвольные URL/HTML дают `422`,
 никакое содержимое не отбрасывается молча. Лимит содержимого — 2 MiB компактного UTF-8
 JSON, 50 000 объектов, 64 уровня JSON. Точные поля — в OpenAPI, ограничения — ADR-010.
 
@@ -191,6 +193,56 @@ JSON, 50 000 объектов, 64 уровня JSON. Точные поля — �
 UPDATE обеих таблиц версий также отвергается триггером PostgreSQL.
 Подробности — [ADR-010](../decisions/ADR-010-document-storage-versions-leases.md).
 
+## Реализованный импорт DOCX (первый backend-инкремент фазы 5)
+
+Права чтения/изменения — как для документа выше. Изменение — только студенту
+своей ВКР, с CSRF, действующей арендой `X-Edit-Lease` и ожидаемой ревизией.
+
+| Метод / путь | Запрос и результат |
+|---|---|
+| `POST /documents/{document_id}/import?expected_revision=N&confirm_replace=true` | Бинарное тело DOCX → `201 {document, version, import_record}` |
+| `GET /documents/{document_id}/imports` | `{items: ImportSummary[], limit, offset}`; исходные байты не входят в список |
+| `GET /documents/{document_id}/imports/{import_id}/source` | Исходные байты DOCX как attachment с UUID-именем |
+| `GET /documents/{document_id}/assets/{asset_id}` | Обработанный PNG по UUID из текста, доступен также после restore |
+
+Content-Type загрузки:
+`application/vnd.openxmlformats-officedocument.wordprocessingml.document`.
+Тело — сам файл, не multipart. OpenAPI описывает binary upload/download.
+Другой Content-Type/Content-Encoding — `415`; файл >10 MiB, включая chunked body, —
+`413`; неправильный Content-Length — `400`; повреждённый/небезопасный или слишком
+сложный ZIP/XML — `422`. Отсутствующее/ложное подтверждение, неверная ревизия
+в query или неизвестный параметр — `422`. Устаревшая revision/lease — `409` без записи.
+Неавторизованный запрос — `401`, недоступный UUID — `404`.
+
+После разбора сервер повторно проверяет lease/revision под row lock. Транзакция
+создаёт защитную версию черновика, заменяет содержимое (schema v2), увеличивает
+revision на 1 и создаёт контрольную версию импорта, исходник и assets.
+`last_version_number` увеличивается на 2; выбранный template_version_id сохраняется.
+Возвращаемая `version` — снимок импортированного текста. Повтор с прежней revision
+не добавляет исходников. Восстановить черновик можно обычным restore.
+
+`ImportSummary`: `id`, `document_id`, `version_id`, `previous_version_id`,
+`created_by_id`, `source_size`, `source_sha256`, `warnings: {code: count}`, `created_at`.
+Источники и assets не обновляются, UPDATE запрещён БД. Исходник хранится отдельно
+в BYTEA, точно совпадает с загрузкой. Список: `limit=50` (1–100), `offset=0`
+(0..2^63−1), создание/UUID по убыванию. Все ответы — `no-store`; binary ответы
+с `nosniff`, исходник — attachment, PNG дополнительно с CSP sandbox.
+
+Поддержаны текст/заголовки/базовое выделение/вложенные списки, типовые таблицы,
+PNG/JPEG; рисунки перекодируются в PNG без исходных метаданных. `norma-image` —
+`{type: "norma-image", version: 1, asset_id: UUID, alt_text}` внутри текстового блока.
+Внешних src/HTML нет; сохранение неизвестного/чужого asset_id — `422`.
+`table/tablerow/tablecell` совместимы с проверенным подмножеством @lexical/table
+0.53.0; таблица до 100 столбцов/1000 строк, colSpan поддержан, rowSpan=1,
+backgroundColor=null. Размеры/цвета/inline CSS не задаются свободно.
+
+Warnings сообщают о нормализации оформления/размещения изображения,
+сносках/колонтитулах/полях/формулах/ссылках/сложных таблицах и других неподдержанных
+элементах; полный перечень и лимиты — [ADR-011](../decisions/ADR-011-docx-import.md).
+HTML не создаётся, внешние relationships не загружаются. Исходник остаётся доступен
+при любых предупреждениях. Импорт семантический: визуальное оформление по шаблону,
+редактор/A4 и экспорт пока не реализованы; Word round-trip не гарантируется.
+
 ## Планируемые бизнес-маршруты
 
 | Модуль | Метод / путь | Сценарий |
@@ -199,7 +251,6 @@ UPDATE обеих таблиц версий также отвергается т
 | stages | `POST /stages/{id}/request-changes` | `in_review → changes_requested`, комментарии остаются в истории |
 | stages | `POST /stages/{id}/confirm` | `in_review → completed`, только руководитель |
 | stages | Расширение `GET /stages/{id}/history` | История отправок и решений вместе с версиями документа |
-| documents | `POST /documents/{id}/import` | UC-01: DOCX → Lexical + warnings; оригинал сохраняется |
 | documents | `GET /documents/{id}/diff?base={version_id}&target={version_id}` | UC-06, подсветка added/removed/changed |
 | comments | `GET /document-versions/{id}/comments?include_resolved=false` | Замечания с фильтрацией |
 | comments | `POST /document-versions/{id}/comments`, `PATCH /comments/{id}` | UC-10, статус/цитата/anchor |

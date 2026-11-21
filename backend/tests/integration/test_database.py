@@ -43,7 +43,8 @@ def test_migration_round_trip(integration_settings: Settings) -> None:
                         "'supervisor_groups', 'group_memberships', "
                         "'theses', 'thesis_stages', 'stage_events', "
                         "'documents', 'document_edit_leases', 'document_versions', "
-                        "'formatting_templates', 'formatting_template_versions')"
+                        "'formatting_templates', 'formatting_template_versions', "
+                        "'document_imports', 'document_assets')"
                     )
                 )
                 roles = await connection.scalars(
@@ -59,7 +60,7 @@ def test_migration_round_trip(integration_settings: Settings) -> None:
 
     run_alembic(integration_settings, "upgrade", "head")
     assert asyncio.run(database_state()) == (
-        "0006_documents",
+        "0007_docx_import",
         {
             "users",
             "auth_sessions",
@@ -73,10 +74,19 @@ def test_migration_round_trip(integration_settings: Settings) -> None:
             "document_versions",
             "formatting_templates",
             "formatting_template_versions",
+            "document_imports",
+            "document_assets",
         },
         ["student", "supervisor"],
     )
     run_alembic(integration_settings, "check")
+    run_alembic(integration_settings, "downgrade", "0006_documents")
+    revision, tables, roles = asyncio.run(database_state())
+    assert revision == "0006_documents"
+    assert {"documents", "document_versions", "formatting_template_versions"} <= tables
+    assert not {"document_imports", "document_assets"} & tables
+    assert roles == ["student", "supervisor"]
+    run_alembic(integration_settings, "upgrade", "head")
     run_alembic(integration_settings, "downgrade", "0005_theses_stages")
     assert asyncio.run(database_state()) == (
         "0005_theses_stages",

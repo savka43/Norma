@@ -1,0 +1,157 @@
+{
+  "root": {
+    "children": [
+      {
+        "children": [
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "detail": 0,
+                        "format": 0,
+                        "mode": "normal",
+                        "style": "",
+                        "text": "Ячейка",
+                        "type": "text",
+                        "version": 1
+                      }
+                    ],
+                    "direction": null,
+                    "format": "",
+                    "indent": 0,
+                    "textFormat": 0,
+                    "textStyle": "",
+                    "type": "paragraph",
+                    "version": 1
+                  }
+                ],
+                "backgroundColor": null,
+                "colSpan": 1,
+                "headerState": 0,
+                "rowSpan": 1,
+                "direction": null,
+                "format": "",
+                "indent": 0,
+                "type": "tablecell",
+                "version": 1
+              },
+              {
+                "children": [
+                  {
+                    "children": [],
+                    "direction": null,
+                    "format": "",
+                    "indent": 0,
+                    "textFormat": 0,
+                    "textStyle": "",
+                    "type": "paragraph",
+                    "version": 1
+                  }
+                ],
+                "backgroundColor": null,
+                "colSpan": 1,
+                "headerState": 0,
+                "rowSpan": 1,
+                "direction": null,
+                "format": "",
+                "indent": 0,
+                "type": "tablecell",
+                "version": 1
+              }
+            ],
+            "direction": null,
+            "format": "",
+            "indent": 0,
+            "type": "tablerow",
+            "version": 1
+          },
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "children": [],
+                    "direction": null,
+                    "format": "",
+                    "indent": 0,
+                    "textFormat": 0,
+                    "textStyle": "",
+                    "type": "paragraph",
+                    "version": 1
+                  }
+                ],
+                "backgroundColor": null,
+                "colSpan": 1,
+                "headerState": 0,
+                "rowSpan": 1,
+                "direction": null,
+                "format": "",
+                "indent": 0,
+                "type": "tablecell",
+                "version": 1
+              },
+              {
+                "children": [
+                  {
+                    "children": [],
+                    "direction": null,
+                    "format": "",
+                    "indent": 0,
+                    "textFormat": 0,
+                    "textStyle": "",
+                    "type": "paragraph",
+                    "version": 1
+                  }
+                ],
+                "backgroundColor": null,
+                "colSpan": 1,
+                "headerState": 0,
+                "rowSpan": 1,
+                "direction": null,
+                "format": "",
+                "indent": 0,
+                "type": "tablecell",
+                "version": 1
+              }
+            ],
+            "direction": null,
+            "format": "",
+            "indent": 0,
+            "type": "tablerow",
+            "version": 1
+          }
+        ],
+        "direction": null,
+        "format": "",
+        "indent": 0,
+        "type": "table",
+        "version": 1
+      },
+      {
+        "children": [
+          {
+            "type": "norma-image",
+            "version": 1,
+            "asset_id": "00000000-0000-0000-0000-000000000001",
+            "alt_text": "Тестовый рисунок"
+          }
+        ],
+        "direction": null,
+        "format": "",
+        "indent": 0,
+        "textFormat": 0,
+        "textStyle": "",
+        "type": "paragraph",
+        "version": 1
+      }
+    ],
+    "direction": null,
+    "format": "",
+    "indent": 0,
+    "type": "root",
+    "version": 1
+  }
+}

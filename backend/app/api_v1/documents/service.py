@@ -100,6 +100,9 @@ async def save_document(
     thesis = await session.get(Thesis, document.thesis_id)
     assert thesis is not None
     await require_template(session, data.template_version_id, thesis.supervisor_id)
+    asset_ids = data.content.image_ids()
+    if await crud.find_asset_ids(session, document.id, asset_ids) != asset_ids:
+        raise HTTPException(422, "Image assets must belong to this document")
     document.content = data.content.stored()
     document.schema_version = data.schema_version
     document.template_version_id = data.template_version_id

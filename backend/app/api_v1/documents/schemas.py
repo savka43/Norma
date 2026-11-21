@@ -1,9 +1,9 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.api_v1.documents.lexical import LexicalContent, VersionOne
+from app.api_v1.documents.lexical import LexicalContent, SchemaVersion
 from app.core.validation import validate_stored_text
 
 
@@ -19,8 +19,14 @@ class RevisionRequest(BaseModel):
 
 class DocumentSave(RevisionRequest):
     content: LexicalContent
-    schema_version: VersionOne
+    schema_version: SchemaVersion
     template_version_id: UUID
+
+    @model_validator(mode="after")
+    def validate_schema_version(self) -> "DocumentSave":
+        if self.schema_version == 1 and self.content.requires_v2():
+            raise ValueError("Tables and images require schema_version 2")
+        return self
 
 
 class VersionCreate(RevisionRequest):

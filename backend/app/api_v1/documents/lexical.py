@@ -2,16 +2,18 @@ from __future__ import annotations
 
 import json
 from typing import Annotated, Literal, Self, cast
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from app.core.validation import validate_stored_text
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 MAX_CONTENT_BYTES = 2 * 1024 * 1024
 MAX_CONTENT_OBJECTS = 50_000
 MAX_JSON_DEPTH = 64
 type VersionOne = Annotated[int, Field(strict=True, ge=1, le=1)]
+type SchemaVersion = Annotated[int, Field(strict=True, ge=1, le=2)]
 type TextFormat = Annotated[int, Field(strict=True, ge=0, le=2047)]
 
 
@@ -29,11 +31,17 @@ class TextNode(Node):
     style: Literal[""]
 
 
+class ImageNode(Node):
+    type: Literal["norma-image"]
+    asset_id: UUID
+    alt_text: str = Field(max_length=2000)
+
+
 class LineBreakNode(Node):
     type: Literal["linebreak"]
 
 
-type InlineNode = Annotated[TextNode | LineBreakNode, Field(discriminator="type")]
+type InlineNode = Annotated[TextNode | LineBreakNode | ImageNode, Field(discriminator="type")]
 
 
 class Element(Node):
@@ -63,7 +71,9 @@ class QuoteNode(Element):
 class ListItemNode(Element):
     type: Literal["listitem"]
     value: int = Field(ge=1, le=2**31 - 1, strict=True)
-    children: list[Annotated[TextNode | LineBreakNode | ListNode, Field(discriminator="type")]]
+    children: list[
+        Annotated[TextNode | LineBreakNode | ImageNode | ListNode, Field(discriminator="type")]
+    ]
 
 
 class ListNode(Element):
@@ -80,8 +90,39 @@ class ListNode(Element):
         return self
 
 
-type BlockNode = Annotated[
+type TextBlockNode = Annotated[
     ParagraphNode | HeadingNode | QuoteNode | ListNode, Field(discriminator="type")
+]
+
+
+class TableCellNode(Element):
+    type: Literal["tablecell"]
+    headerState: int = Field(ge=0, le=3, strict=True)
+    colSpan: int = Field(ge=1, le=100, strict=True)
+    rowSpan: VersionOne
+    backgroundColor: None
+    children: Annotated[list[TextBlockNode], Field(min_length=1)]
+
+
+class TableRowNode(Element):
+    type: Literal["tablerow"]
+    children: Annotated[list[TableCellNode], Field(min_length=1, max_length=100)]
+
+
+class TableNode(Element):
+    type: Literal["table"]
+    children: Annotated[list[TableRowNode], Field(min_length=1, max_length=1000)]
+
+    @model_validator(mode="after")
+    def validate_grid(self) -> Self:
+        widths = {sum(cell.colSpan for cell in row.children) for row in self.children}
+        if len(widths) != 1 or max(widths) > 100:
+            raise ValueError("A table must have a rectangular grid of at most 100 columns")
+        return self
+
+
+type BlockNode = Annotated[
+    ParagraphNode | HeadingNode | QuoteNode | ListNode | TableNode, Field(discriminator="type")
 ]
 
 
@@ -120,6 +161,31 @@ class LexicalContent(BaseModel):
 
     def stored(self) -> dict[str, JsonValue]:
         return cast(dict[str, JsonValue], self.model_dump(mode="json", exclude_unset=True))
+
+    def image_ids(self) -> set[UUID]:
+        return {
+            UUID(str(node["asset_id"]))
+            for node in content_nodes(self.stored())
+            if node.get("type") == "norma-image"
+        }
+
+    def requires_v2(self) -> bool:
+        return any(
+            node.get("type") in ("table", "norma-image") for node in content_nodes(self.stored())
+        )
+
+
+def content_nodes(content: dict[str, JsonValue]) -> list[dict[str, JsonValue]]:
+    result: list[dict[str, JsonValue]] = []
+    stack: list[JsonValue] = [content["root"]]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, dict):
+            result.append(node)
+            children = node.get("children")
+            if isinstance(children, list):
+                stack.extend(children)
+    return result
 
 
 def empty_content() -> dict[str, JsonValue]:

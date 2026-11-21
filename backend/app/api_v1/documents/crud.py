@@ -4,9 +4,67 @@ from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import undefer
 
 from app.api_v1.supervisor_groups.schemas import PageParams
-from app.core.models import Document, DocumentEditLease, DocumentVersion, Thesis, User, UserRole
+from app.core.models import (
+    Document,
+    DocumentAsset,
+    DocumentEditLease,
+    DocumentImport,
+    DocumentVersion,
+    Thesis,
+    User,
+    UserRole,
+)
+
+
+async def find_asset_ids(
+    session: AsyncSession, document_id: UUID, asset_ids: set[UUID]
+) -> set[UUID]:
+    if not asset_ids:
+        return set()
+    return set(
+        await session.scalars(
+            select(DocumentAsset.id).where(
+                DocumentAsset.document_id == document_id, DocumentAsset.id.in_(asset_ids)
+            )
+        )
+    )
+
+
+async def list_imports(
+    session: AsyncSession, document_id: UUID, params: PageParams
+) -> list[DocumentImport]:
+    return list(
+        await session.scalars(
+            select(DocumentImport)
+            .where(DocumentImport.document_id == document_id)
+            .order_by(DocumentImport.created_at.desc(), DocumentImport.id.desc())
+            .limit(params.limit)
+            .offset(params.offset)
+        )
+    )
+
+
+async def find_import_source(
+    session: AsyncSession, document_id: UUID, import_id: UUID
+) -> bytes | None:
+    return await session.scalar(
+        select(DocumentImport.source).where(
+            DocumentImport.id == import_id, DocumentImport.document_id == document_id
+        )
+    )
+
+
+async def find_asset(
+    session: AsyncSession, document_id: UUID, asset_id: UUID
+) -> DocumentAsset | None:
+    return await session.scalar(
+        select(DocumentAsset)
+        .options(undefer(DocumentAsset.data))
+        .where(DocumentAsset.id == asset_id, DocumentAsset.document_id == document_id)
+    )
 
 
 async def find_document(

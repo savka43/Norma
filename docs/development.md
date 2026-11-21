@@ -10,6 +10,8 @@ login/logout/me, серверные сессии и CLI bootstrap руковод
 добавляет ВКР, настройку обязательных этапов/сроков, историю плана и сводку прогресса.
 Backend-инкремент фазы 4 добавляет документы, аренду редактирования, сохранение
 с ревизиями, неизменяемые контрольные версии/восстановление и версии шаблонов.
+Первый backend-инкремент фазы 5 добавляет защищённый импорт DOCX с исходником,
+предупреждениями, таблицами и обработанными изображениями.
 Корневая `src/` пока содержит исходную заготовку Vite/React.
 
 ## Запуск API в Docker
@@ -91,7 +93,10 @@ uv run alembic check
 `0005_theses_stages` добавляет ВКР, этапы, enum состояний и историю настройки плана.
 `0006_documents` добавляет документы, аренды, контрольные версии и шаблоны;
 триггеры PostgreSQL запрещают UPDATE контрольных версий и снимков параметров.
-`uv run alembic current` показывает `0006_documents (head)`.
+`0007_docx_import` добавляет отдельные исходники/изображения и schema v2;
+UPDATE исходников/assets также запрещён. Откат к v1 при наличии v2-документов
+или снимков запрещён, чтобы не менять историю.
+`uv run alembic current` показывает `0007_docx_import (head)`.
 Приложение не вызывает `create_all` и не запускает миграции при каждом HTTP-запросе.
 
 Учётная запись содержит ФИО, email, хэш пароля Argon2id и явную роль
@@ -247,7 +252,7 @@ PY
    `POST /api/v1/documents/{document_id}/edit-lease/renew` с `X-Edit-Lease: UUID`.
    TTL — `NORMA_DOCUMENT_LEASE_SECONDS` (по умолчанию 120 секунд, диапазон 30–3600).
 3. `PUT /api/v1/documents/{document_id}` с заголовками `X-CSRF-Protection: 1`,
-   `X-Edit-Lease: UUID` и `{expected_revision, schema_version: 1, content, template_version_id}`
+   `X-Edit-Lease: UUID` и `{expected_revision, schema_version, content, template_version_id}`
    сохраняет JSON и возвращает новую ревизию. Нельзя подставлять новую ревизию
    к старому запросу без разрешения конфликта; при `409` сохраните локальный текст.
 4. `POST /api/v1/documents/{document_id}/versions` с теми же заголовками и
@@ -264,10 +269,49 @@ PY
 Чтение доступно также руководителю этой ВКР, изменение — только студенту.
 История текста и параметров сохраняется при дальнейших изменениях.
 Клиент хранит один Lexical JSON, а не отдельный текст для каждой страницы.
-Текущая схема поддерживает абзацы, заголовки, цитаты, базовое выделение, переносы
-строк и вложенные списки; неизвестные узлы/inline CSS/таблицы/изображения — `422`.
-Импорт DOCX, экспорт, diff и frontend/A4 появятся в следующих задачах.
+Схема v1 поддерживает абзацы, заголовки, цитаты, базовое выделение, переносы
+строк и вложенные списки; v2 добавляет таблицы и узел изображения по asset UUID.
+Передавайте schema_version прочитанного документа, после импорта — 2.
+Неизвестные узлы/inline CSS/произвольные URL — `422`.
+Экспорт, diff и frontend/A4 появятся в следующих задачах.
 Подробности — [ADR-010](decisions/ADR-010-document-storage-versions-leases.md).
+
+### Импорт DOCX
+
+После создания документа и получения аренды студент отправляет файл бинарным
+телом на `POST /api/v1/documents/{document_id}/import?expected_revision=N&confirm_replace=true`.
+Обязательны сессия, `X-CSRF-Protection: 1`, `X-Edit-Lease: UUID` и Content-Type DOCX.
+Подтверждение замены нужно получить от пользователя до запроса; это не preview.
+Пример из корня (подставьте UUID/актуальную revision и cookie-файл после входа):
+
+```bash
+curl 'http://localhost:8000/api/v1/documents/DOCUMENT_UUID/import?expected_revision=1&confirm_replace=true' \
+  --cookie cookies.txt \
+  --header 'X-CSRF-Protection: 1' \
+  --header 'X-Edit-Lease: LEASE_UUID' \
+  --header 'Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document' \
+  --data-binary @backend/tests/fixtures/synthetic-import.docx
+```
+
+`201` содержит обновлённый `document`, контрольную `version`, `import_record`.
+Исходник и снимки до/после сохраняются одной транзакцией; revision увеличивается
+на 1, номера контрольных версий — на 2. Шаблон остаётся прежним. При конфликте
+аренды/revision — `409`, исходник и версии не добавляются. Прежний черновик можно
+восстановить по `import_record.previous_version_id` обычным restore.
+
+- `GET /api/v1/documents/{document_id}/imports?limit=50&offset=0` — метаданные,
+  SHA-256, warnings и ссылки на снимки; без blobs.
+- `GET /api/v1/documents/{document_id}/imports/{import_id}/source` — точный оригинал.
+- `GET /api/v1/documents/{document_id}/assets/{asset_id}` — обработанный PNG;
+  UUID находится в `norma-image` содержимого. Читает также руководитель этой ВКР.
+
+Лимит загрузки — 10 MiB (`413`), повреждённый/небезопасный ZIP/XML — `422`,
+другой Content-Type/Content-Encoding — `415`. Multipart не поддерживается.
+Неизвестные/сложные элементы отражаются в `warnings: {code: count}`; frontend
+должен показывать их. Отдельные колонтитулы/сноски/сложные объекты остаются
+в оригинале, внешние ссылки не загружаются. Это семантический импорт с выбранным
+шаблоном; визуальное оформление, редактор и экспорт пока не реализованы.
+Точные ограничения/коды — [ADR-011](decisions/ADR-011-docx-import.md).
 
 ### Проверочная фикстура Lexical
 
@@ -276,11 +320,18 @@ PY
 Для повторного создания из корня (Node.js/npm нужны только этому tooling):
 
 ```bash
-npm install --prefix /tmp/norma-lexical-qa --no-save --ignore-scripts --package-lock=false lexical@0.53.0 @lexical/headless@0.53.0 @lexical/rich-text@0.53.0 @lexical/list@0.53.0
+npm install --prefix /tmp/norma-lexical-qa --no-save --ignore-scripts --package-lock=false lexical@0.53.0 @lexical/headless@0.53.0 @lexical/rich-text@0.53.0 @lexical/list@0.53.0 @lexical/table@0.53.0
 node backend/tests/fixtures/generate_lexical.cjs /tmp/norma-lexical-qa backend/tests/fixtures/lexical-0.53.0.json
+node backend/tests/fixtures/generate_lexical_table.cjs /tmp/norma-lexical-qa backend/tests/fixtures/lexical-table-0.53.0.json
 ```
 
 В backend runtime пакеты npm не нужны; обычный pytest использует готовую фикстуру.
+Второй генератор дополнительно принимает путь к импортированному JSON и проверяет
+сохранность текста/изображений/таблиц при чтении реальным Lexical. `norma-image`
+здесь — сериализационная заглушка; продуктового frontend-рендерера ещё нет.
+Синтетический DOCX с заголовком, списками, таблицей, рисунком и колонтитулом
+создаётся из `backend/` командой `uv run python tests/fixtures/generate_docx.py`;
+python-docx — только dev-зависимость. Оригинальные документы пользователя не нужны.
 
 ## Проверки backend
 
@@ -300,8 +351,10 @@ auth-сценарии, истечение/отзыв/ротацию сессий
 группы, чужой доступ, поиск и конкурентное добавление студента,
 ВКР, настройку этапов, историю, прогресс и конкурентные изменения плана.
 Дополнительно проверяются JSON-схемы документов/параметров, аренда/истечение,
-сохранение, снимки/восстановление, запрет UPDATE снимков и шесть сценариев гонок
+сохранение, снимки/восстановление, запрет UPDATE снимков и девять сценариев гонок
 на независимых соединениях PostgreSQL.
+Проверяются DOCX-импорт/предупреждения/источники/assets, опасные ZIP/XML,
+лимиты chunked upload, сохранность снимков и защита отката schema v2.
 Создайте отдельную тестовую БД один раз (из корня репозитория):
 
 ```bash

@@ -13,12 +13,17 @@ from fastapi.testclient import TestClient
 from httpx import AsyncClient
 from sqlalchemy import delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.concurrency import run_in_threadpool
 
+from app.api_v1.documents import crud as document_crud
+from app.api_v1.documents.docx_import import DOCX_MEDIA_TYPE
 from app.core.config import Settings
 from app.core.database import create_engine, create_session_factory
 from app.core.models import (
     Document,
+    DocumentAsset,
     DocumentEditLease,
+    DocumentImport,
     DocumentVersion,
     FormattingTemplate,
     FormattingTemplateVersion,
@@ -26,10 +31,13 @@ from app.core.models import (
     SupervisorGroup,
     Thesis,
     User,
+    UserRole,
 )
 from app.main import create_app
 from tests.document_helpers import content, parameters
+from tests.docx_helpers import docx, paragraph
 from tests.integration.actors import Actors, authenticate, make_actors, seed_actors
+from tests.integration.alembic_helpers import run_alembic
 
 pytestmark = pytest.mark.integration
 
@@ -318,7 +326,7 @@ async def test_csrf_headers_and_missing_resources(
 @pytest.mark.parametrize(
     "changes",
     [
-        {"schema_version": 2},
+        {"schema_version": 3},
         {"schema_version": True},
         {"expected_revision": True},
         {"expected_revision": "1"},
@@ -513,10 +521,24 @@ async def test_history_and_template_pagination_validation(
 
 
 @pytest.mark.parametrize(
-    "operation", ["document", "lease", "save", "snapshots", "save_restore", "template"]
+    "operation",
+    [
+        "document",
+        "lease",
+        "save",
+        "snapshots",
+        "save_restore",
+        "template",
+        "import",
+        "import_save",
+        "import_restore",
+    ],
 )
 def test_concurrent_document_operations(
-    migrated_database: None, integration_settings: Settings, operation: str
+    migrated_database: None,
+    integration_settings: Settings,
+    operation: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     actors = make_actors()
     thesis_id, template_id, template_version_id, document_id, lease_id, snapshot_id = (
@@ -530,6 +552,12 @@ def test_concurrent_document_operations(
             async with create_session_factory(engine)() as session:
                 if cleanup:
                     scope = DocumentVersion.document_id == document_id
+                    await session.execute(
+                        delete(DocumentAsset).where(DocumentAsset.document_id == document_id)
+                    )
+                    await session.execute(
+                        delete(DocumentImport).where(DocumentImport.document_id == document_id)
+                    )
                     await session.execute(
                         delete(DocumentEditLease).where(
                             DocumentEditLease.document_id == document_id
@@ -598,11 +626,20 @@ def test_concurrent_document_operations(
                                 thesis_id=thesis_id,
                                 content=content("Исходный"),
                                 template_version_id=template_version_id,
-                                last_version_number=1 if operation == "save_restore" else 0,
+                                last_version_number=1
+                                if operation in {"save_restore", "import_restore"}
+                                else 0,
                             )
                         )
                         await session.flush()
-                    if operation in {"save", "snapshots", "save_restore"}:
+                    if operation in {
+                        "save",
+                        "snapshots",
+                        "save_restore",
+                        "import",
+                        "import_save",
+                        "import_restore",
+                    }:
                         now = datetime.now(UTC)
                         session.add(
                             DocumentEditLease(
@@ -613,7 +650,7 @@ def test_concurrent_document_operations(
                                 expires_at=now + timedelta(minutes=5),
                             )
                         )
-                    if operation == "save_restore":
+                    if operation in {"save_restore", "import_restore"}:
                         session.add(
                             DocumentVersion(
                                 id=snapshot_id,
@@ -632,6 +669,18 @@ def test_concurrent_document_operations(
 
     try:
         asyncio.run(prepare_or_cleanup(cleanup=False))
+        if operation.startswith("import"):
+            original_find = document_crud.find_document
+            lock_barrier = Barrier(2)
+
+            async def synchronized_find(
+                session: AsyncSession, requested_id: UUID, user: User, *, lock: bool = False
+            ) -> Document | None:
+                if lock and requested_id == document_id and user.role == UserRole.STUDENT:
+                    await run_in_threadpool(lock_barrier.wait, 10)
+                return await original_find(session, requested_id, user, lock=lock)
+
+            monkeypatch.setattr(document_crud, "find_document", synchronized_find)
         headers = {"X-CSRF-Protection": "1", "X-Edit-Lease": str(lease_id)}
         with (
             TestClient(create_app(integration_settings), headers=headers) as first,
@@ -660,7 +709,13 @@ def test_concurrent_document_operations(
                     )
                 elif operation == "snapshots":
                     response = client.post(f"{base}/versions", json={"expected_revision": 1})
-                elif operation == "save_restore" and index == 1:
+                elif operation.startswith("import") and (index == 0 or operation == "import"):
+                    response = client.post(
+                        f"{base}/import?expected_revision=1&confirm_replace=true",
+                        headers={"Content-Type": DOCX_MEDIA_TYPE},
+                        content=docx(paragraph(f"Импорт {index}")),
+                    )
+                elif operation in {"save_restore", "import_restore"} and index == 1:
                     response = client.post(
                         f"{base}/restore",
                         json={"expected_revision": 1, "version_id": str(snapshot_id)},
@@ -683,7 +738,7 @@ def test_concurrent_document_operations(
                     for index, client in enumerate((first, second))
                 ]
                 results = [future.result(timeout=20) for future in futures]
-            success = 200 if operation in {"save", "save_restore"} else 201
+            success = next(code for code, _ in results if code in (200, 201))
             assert sorted(code for code, _ in results) == (
                 [201, 201] if operation == "snapshots" else [success, 409]
             )
@@ -701,7 +756,33 @@ def test_concurrent_document_operations(
                 base = f"/api/v1/documents/{document_id}"
                 document = first.get(base).json()
                 versions = first.get(f"{base}/versions").json()["items"]
-                if operation in {"save", "save_restore"}:
+                if operation.startswith("import"):
+                    assert document["revision"] == 2
+                    imports = first.get(f"{base}/imports").json()["items"]
+                    imported = operation == "import" or winner == 0
+                    assert len(imports) == int(imported)
+                    if imported:
+                        assert document["schema_version"] == 2
+                        assert f"Импорт {winner}" in json.dumps(
+                            document["content"], ensure_ascii=False
+                        )
+                        assert len(versions) == (3 if operation == "import_restore" else 2)
+                        old = first.get(
+                            f"/api/v1/document-versions/{imports[0]['previous_version_id']}"
+                        ).json()
+                        assert old["content"] == content("Исходный")
+                        if operation == "import":
+                            with pytest.raises(AssertionError, match="Cannot downgrade"):
+                                run_alembic(integration_settings, "downgrade", "0006_documents")
+                            assert first.get(base).json() == document
+                            run_alembic(integration_settings, "current")
+                    else:
+                        expected = content(
+                            "Исходный" if operation == "import_restore" else "Текст 1"
+                        )
+                        assert document["content"] == expected
+                        assert len(versions) == (2 if operation == "import_restore" else 0)
+                elif operation in {"save", "save_restore"}:
                     assert document["revision"] == 2
                     expected = (
                         content("Исходный")

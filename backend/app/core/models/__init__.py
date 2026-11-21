@@ -7,6 +7,7 @@ from app.core.models.document import (
     FormattingTemplate,
     FormattingTemplateVersion,
 )
+from app.core.models.document_import import DocumentAsset, DocumentImport
 from app.core.models.supervisor_group import GroupMembership, SupervisorGroup
 from app.core.models.thesis import StageEvent, StageStatus, Thesis, ThesisStage
 from app.core.models.user import User, UserRole
@@ -23,6 +24,8 @@ __all__ = [
     "StageStatus",
     "StageEvent",
     "Document",
+    "DocumentAsset",
+    "DocumentImport",
     "DocumentEditLease",
     "DocumentVersion",
     "FormattingTemplate",
