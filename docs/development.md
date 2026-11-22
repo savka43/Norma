@@ -273,7 +273,7 @@ PY
 строк и вложенные списки; v2 добавляет таблицы и узел изображения по asset UUID.
 Передавайте schema_version прочитанного документа, после импорта — 2.
 Неизвестные узлы/inline CSS/произвольные URL — `422`.
-Экспорт, diff и frontend/A4 появятся в следующих задачах.
+Оформление и экспорт описаны ниже; diff и frontend/A4 остаются следующими задачами.
 Подробности — [ADR-010](decisions/ADR-010-document-storage-versions-leases.md).
 
 ### Импорт DOCX
@@ -310,7 +310,7 @@ curl 'http://localhost:8000/api/v1/documents/DOCUMENT_UUID/import?expected_revis
 Неизвестные/сложные элементы отражаются в `warnings: {code: count}`; frontend
 должен показывать их. Отдельные колонтитулы/сноски/сложные объекты остаются
 в оригинале, внешние ссылки не загружаются. Это семантический импорт с выбранным
-шаблоном; визуальное оформление, редактор и экспорт пока не реализованы.
+шаблоном; редактор/A4 пока не реализован, оформление/экспорт описаны ниже.
 Точные ограничения/коды — [ADR-011](decisions/ADR-011-docx-import.md).
 
 ### Проверочная фикстура Lexical
@@ -334,6 +334,53 @@ node backend/tests/fixtures/generate_lexical_table.cjs /tmp/norma-lexical-qa bac
 python-docx — только dev-зависимость. Оригинальные документы пользователя не нужны.
 
 ## Проверки backend
+
+### Оформление и экспорт DOCX/PDF
+
+1. Вошедший пользователь получает `GET /api/v1/formatting-presets/gost-7-32-2017`.
+   Руководитель может отредактировать параметры и сохранить через
+   `POST /api/v1/formatting-templates`, затем студент выбирает эту версию шаблона.
+2. Студент сохраняет документ и создаёт контрольную версию обычным API.
+   `POST /api/v1/document-versions/{version_id}/format-check` возвращает отчёт
+   по неизменяемой версии и её параметрам; доступен также руководителю.
+3. Для исправления студент отправляет
+   `POST /api/v1/documents/{document_id}/apply-formatting` с JSON
+   `{expected_revision, template_version_id, confirm_apply: true}`,
+   CSRF и текущим `X-Edit-Lease`. Сохраняются версии до/после, revision +1.
+4. Для скачивания: `POST /api/v1/document-versions/{version_id}/exports`,
+   CSRF и JSON `{"format":"docx"}` либо `{"format":"pdf"}`. Ответ — файл,
+   не JSON. UUID исходной версии и шаблона — в `X-Document-Version` и
+   `X-Template-Version`. Используется шаблон снимка, изменение черновика на него
+   не влияет. В Swagger доступны binary response и download.
+
+Docker-образ включает LibreOffice Writer и Liberation/DejaVu. При локальном запуске
+вне Docker PDF требует отдельной установки LibreOffice и пути
+`NORMA_PDF_CONVERTER` (по умолчанию `libreoffice`).
+`NORMA_PDF_TIMEOUT_SECONDS` — 60 по умолчанию, 1–120. При недоступности/таймауте
+возвращается `503`; DOCX продолжает работать. Два экспорта на процесс и 32 MiB
+ограничивают ресурсы; занятость требует явного повторного запроса.
+
+`X-Export-Warnings: font_substitution` сообщает о замене шрифта в PDF:
+Microsoft Times New Roman не поставляется в образе, LibreOffice может применять
+Liberation Serif. Для точного выбранного семейства установите лицензированный
+шрифт в собственный образ. DOCX сохраняет исходное название семейства.
+`manual_formatting_normalized` означает применение семантических правил к экспорту
+без изменения исходного снимка. Проверка JSON не заменяет визуальную приёмку
+страниц или полный аудит ГОСТ. Точная идентичность Word/браузеру не обещается.
+
+Визуальные фикстуры создаются из `backend/` без пользовательских документов:
+
+```bash
+uv run python -m tests.fixtures.generate_export /tmp/norma-export-qa
+```
+
+Генератор пишет short/long/landscape DOCX с кириллицей, таблицами, вложенными
+списками и рисунком. Реальные PDF-тесты запускаются в среде с LibreOffice;
+на хосте без него явно пропускаются. Отдельный запуск в контейнере с тестами,
+смонтированными в `/app/tests`, может использовать минимальное тестовое окружение
+`uv run --no-dev --with pytest --with pytest-asyncio --with pypdf pytest`.
+
+### Команды
 
 Из `backend/`:
 

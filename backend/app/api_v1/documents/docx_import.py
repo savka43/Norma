@@ -250,6 +250,12 @@ class Converter:
         if properties is not None and properties.find(W + "pageBreakBefore") is not None:
             self.warn("page_break_normalized")
         chain = self.style_chain(val(properties, W + "pStyle"))
+        for style in chain:
+            caption = {"Norma Table Caption": "table", "Norma Figure Caption": "figure"}.get(
+                val(style, W + "name") or ""
+            )
+            if caption:
+                result["caption"] = caption
         for source in [*(s.find(W + "pPr") for s in chain), properties]:
             for key, path in (
                 ("outline", W + "outlineLvl"),
@@ -473,6 +479,8 @@ class Converter:
                     node = element("heading" if outline < 6 else "paragraph", inline)
                     if outline < 6:
                         node["tag"] = "h" + str(outline + 1)
+                    elif "caption" in props:
+                        node["type"], node["kind"] = "norma-caption", props["caption"]
                     elif outline < 9:
                         self.warn("heading_level_normalized")
                     result.append(node)

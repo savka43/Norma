@@ -326,7 +326,7 @@ async def test_csrf_headers_and_missing_resources(
 @pytest.mark.parametrize(
     "changes",
     [
-        {"schema_version": 3},
+        {"schema_version": 4},
         {"schema_version": True},
         {"expected_revision": True},
         {"expected_revision": "1"},
@@ -532,6 +532,9 @@ async def test_history_and_template_pagination_validation(
         "import",
         "import_save",
         "import_restore",
+        "format",
+        "format_save",
+        "format_restore",
     ],
 )
 def test_concurrent_document_operations(
@@ -627,8 +630,9 @@ def test_concurrent_document_operations(
                                 content=content("Исходный"),
                                 template_version_id=template_version_id,
                                 last_version_number=1
-                                if operation in {"save_restore", "import_restore"}
+                                if operation in {"save_restore", "import_restore", "format_restore"}
                                 else 0,
+                                schema_version=3 if operation == "format" else 1,
                             )
                         )
                         await session.flush()
@@ -639,6 +643,9 @@ def test_concurrent_document_operations(
                         "import",
                         "import_save",
                         "import_restore",
+                        "format",
+                        "format_save",
+                        "format_restore",
                     }:
                         now = datetime.now(UTC)
                         session.add(
@@ -650,7 +657,7 @@ def test_concurrent_document_operations(
                                 expires_at=now + timedelta(minutes=5),
                             )
                         )
-                    if operation in {"save_restore", "import_restore"}:
+                    if operation in {"save_restore", "import_restore", "format_restore"}:
                         session.add(
                             DocumentVersion(
                                 id=snapshot_id,
@@ -669,7 +676,7 @@ def test_concurrent_document_operations(
 
     try:
         asyncio.run(prepare_or_cleanup(cleanup=False))
-        if operation.startswith("import"):
+        if operation.startswith(("import", "format")):
             original_find = document_crud.find_document
             lock_barrier = Barrier(2)
 
@@ -715,7 +722,18 @@ def test_concurrent_document_operations(
                         headers={"Content-Type": DOCX_MEDIA_TYPE},
                         content=docx(paragraph(f"Импорт {index}")),
                     )
-                elif operation in {"save_restore", "import_restore"} and index == 1:
+                elif operation.startswith("format") and (index == 0 or operation == "format"):
+                    response = client.post(
+                        f"{base}/apply-formatting",
+                        json={
+                            "expected_revision": 1,
+                            "template_version_id": str(template_version_id),
+                            "confirm_apply": True,
+                        },
+                    )
+                elif (
+                    operation in {"save_restore", "import_restore", "format_restore"} and index == 1
+                ):
                     response = client.post(
                         f"{base}/restore",
                         json={"expected_revision": 1, "version_id": str(snapshot_id)},
@@ -756,7 +774,23 @@ def test_concurrent_document_operations(
                 base = f"/api/v1/documents/{document_id}"
                 document = first.get(base).json()
                 versions = first.get(f"{base}/versions").json()["items"]
-                if operation.startswith("import"):
+                if operation.startswith("format"):
+                    assert document["revision"] == 2
+                    applied = operation == "format" or winner == 0
+                    assert len(versions) == (
+                        (3 if operation == "format_restore" else 2)
+                        if applied
+                        else (2 if operation == "format_restore" else 0)
+                    )
+                    assert document["content"] == content(
+                        "Исходный" if applied or operation == "format_restore" else "Текст 1"
+                    )
+                    if operation == "format":
+                        with pytest.raises(AssertionError, match="Cannot downgrade"):
+                            run_alembic(integration_settings, "downgrade", "0007_docx_import")
+                        assert first.get(base).json() == document
+                        run_alembic(integration_settings, "check")
+                elif operation.startswith("import"):
                     assert document["revision"] == 2
                     imports = first.get(f"{base}/imports").json()["items"]
                     imported = operation == "import" or winner == 0

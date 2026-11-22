@@ -11,6 +11,7 @@ dependencies = [
     "pillow>=12,<13",
     "pwdlib[argon2]>=0.3,<1",
     "pydantic-settings>=2.7,<3",
+    "python-docx>=1.2,<2",
     "sqlalchemy[asyncio]>=2.0.36,<2.1",
 ]
 
@@ -19,9 +20,9 @@ dev = [
     "asyncpg-stubs>=0.32,<1",
     "basedpyright>=1.28,<2",
     "httpx>=0.28,<1",
+    "pypdf>=6,<7",
     "pytest>=8.3,<10",
     "pytest-asyncio>=1,<2",
-    "python-docx>=1.2,<2",
     "ruff>=0.9,<1",
     "types-defusedxml>=0.7,<1",
 ]

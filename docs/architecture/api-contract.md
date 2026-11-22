@@ -185,7 +185,7 @@ JSON, 50 000 объектов, 64 уровня JSON. Точные поля — �
 (6 уровней)/caption/list/table, начало нумерации. Стиль задаёт шрифт, размер в pt,
 интервалы, отступ, выравнивание и bold/italic. Выбирать в документ можно только
 версию шаблона руководителя этой ВКР. Свободному студенту список шаблонов пуст.
-ГОСТ-предустановка и фактическое применение оформления ещё не реализованы.
+ГОСТ-предустановка, применение оформления и экспорт реализованы ниже.
 
 Списки шаблонов/версий: `limit=50` (1–100), `offset=0` (0..2^63−1).
 Шаблоны сортируются по созданию/UUID по убыванию, их версии — номер по убыванию.
@@ -241,7 +241,56 @@ Warnings сообщают о нормализации оформления/ра�
 элементах; полный перечень и лимиты — [ADR-011](../decisions/ADR-011-docx-import.md).
 HTML не создаётся, внешние relationships не загружаются. Исходник остаётся доступен
 при любых предупреждениях. Импорт семантический: визуальное оформление по шаблону,
-редактор/A4 и экспорт пока не реализованы; Word round-trip не гарантируется.
+редактор/A4 пока не реализованы; экспорт по шаблону описан ниже,
+Word round-trip произвольного документа не гарантируется.
+
+## Реализованные оформление и экспорт (второй backend-инкремент фазы 5)
+
+Все пути под `/api/v1`. Сессии/CSRF/ownership — как для документов выше.
+
+| Метод / путь | Поведение |
+|---|---|
+| `GET /formatting-presets/gost-7-32-2017` | Любой вошедший пользователь получает редактируемые `TemplateParameters`; сохранить через обычное создание шаблона руководителем |
+| `POST /document-versions/{version_id}/format-check` | Студент своей ВКР и её руководитель; проверка по pinned версии шаблона, снимок не меняется |
+| `POST /documents/{document_id}/apply-formatting` | Только студент-владелец, `X-Edit-Lease`; `{expected_revision, template_version_id, confirm_apply: true}` → `{document, previous_version, version, corrected_issues}` |
+| `POST /document-versions/{version_id}/exports` | Студент своей ВКР и её руководитель; `{format: "docx"|"pdf"}` → binary attachment; источник и шаблон берутся исключительно из версии |
+
+`FormattingReport`: `{version_id, template_version_id, parameters, conforms,
+issue_count, issues, truncated, scope: "semantic-formatting"}`.
+`issues` — первые 1000 `{path, code, actual, expected}`; `issue_count` — полный
+счётчик. Коды: `alignment_override`, `indent_override`, `text_effect_override`.
+Проверяются семантический JSON и сохранённые параметры, а не геометрия страниц
+или исходный DOCX. Свободные шрифты/CSS уже запрещены схемой; размеры и интервалы
+определяются шаблоном. `conforms` не означает полного аудита ГОСТ.
+
+Применение сохраняет защитный снимок, очищает ручные overrides, выбирает шаблон,
+увеличивает revision на 1 и сохраняет итоговую версию (`last_version_number +2`).
+Текст/структура/изображения/семантические выделения сохраняются. Старый снимок
+не переписывается. Неактуальная revision/lease — `409`; неизвестная/чужая версия
+шаблона — `404`; ложное/небулево подтверждение и неизвестные поля — `422`.
+
+Schema v3 дополнительно принимает `{type: "norma-caption", version: 1,
+kind: "figure"|"table", children, direction, format, indent, textFormat?, textStyle?}`.
+`children` — стандартные inline-узлы; `textStyle` по-прежнему только пустой.
+Подписи требуют `schema_version: 3`; v1/v2-снимки не меняются. Повторный импорт
+собственных DOCX-стилей `Norma Figure Caption`/`Norma Table Caption` сохраняет kind.
+
+Экспорт возвращает `200` с Content-Type DOCX либо `application/pdf`, `no-store`,
+`nosniff`, `Content-Disposition: attachment` и UUID-именем, `X-Document-Version`
+и `X-Template-Version`. `X-Export-Warnings` — разделённые запятыми коды:
+`manual_formatting_normalized` (применены правила поверх ручных overrides),
+`font_substitution` (для PDF исходный шрифт отсутствует/проверка недоступна).
+Документ при экспорте не меняется. DOCX хранит запрошенные семейства; Docker PDF
+использует установленные Liberation/DejaVu, возможна замена Times New Roman.
+
+DOCX поддерживает семантические блоки v1–v3, девять уровней списков, numbering/start,
+типовые таблицы/colSpan, PNG/alt text, A4/ориентацию/поля и поле PAGE.
+Слишком глубокие списки/превышение бюджета изображений или файла (32 MiB) — `422`.
+PDF создаётся LibreOffice из сгенерированного DOCX с отдельным профилем/каталогом;
+таймаут по умолчанию 60 секунд. Конвертер недоступен/ошибка/таймаут или два
+занятых слота экспорта на процесс — `503`; автоматического повтора нет.
+Файлы экспорта не сохраняются в БД; неизменяемые исходные версии сохраняются.
+Подробности — [ADR-012](../decisions/ADR-012-formatting-and-export.md).
 
 ## Планируемые бизнес-маршруты
 
@@ -254,8 +303,6 @@ HTML не создаётся, внешние relationships не загружаю
 | documents | `GET /documents/{id}/diff?base={version_id}&target={version_id}` | UC-06, подсветка added/removed/changed |
 | comments | `GET /document-versions/{id}/comments?include_resolved=false` | Замечания с фильтрацией |
 | comments | `POST /document-versions/{id}/comments`, `PATCH /comments/{id}` | UC-10, статус/цитата/anchor |
-| formatting | `POST /document-versions/{id}/format-check` | Проверка по snapshot шаблона |
-| formatting | `POST /document-versions/{id}/exports` | UC-02, DOCX/PDF |
 | plagiarism | `POST /document-versions/{id}/plagiarism-checks` | UC-03, создать долговечное задание |
 | plagiarism | `GET /plagiarism-checks/{id}`, `GET /plagiarism-checks/{id}/report` | Статус и отчёт при доступности |
 

@@ -7,10 +7,12 @@ from app.api_v1.auth.dependencies import CurrentUserDep, SupervisorDep
 from app.api_v1.dependencies import SessionDep
 from app.api_v1.formatting import crud, service
 from app.api_v1.formatting.dependencies import AccessibleTemplateDep, LockedOwnedTemplateDep
+from app.api_v1.formatting.presets import gost_parameters
 from app.api_v1.formatting.schemas import (
     TemplateCreate,
     TemplateCreatedResponse,
     TemplatePage,
+    TemplateParameters,
     TemplateResponse,
     TemplateVersionCreate,
     TemplateVersionPage,
@@ -20,6 +22,12 @@ from app.api_v1.supervisor_groups.schemas import PageParams
 
 router = APIRouter(tags=["formatting templates"])
 PageParamsDep = Annotated[PageParams, Query()]
+
+
+@router.get("/formatting-presets/gost-7-32-2017")
+async def get_gost_preset(user: CurrentUserDep, response: Response) -> TemplateParameters:
+    response.headers["Cache-Control"] = "no-store"
+    return gost_parameters()
 
 
 @router.post("/formatting-templates", status_code=201)

@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     session_lifetime_seconds: int = Field(default=28800, ge=60, le=2592000)
     session_cookie_secure: bool = False
     document_lease_seconds: int = Field(default=120, ge=30, le=3600)
+    pdf_converter: str = Field(default="libreoffice", min_length=1)
+    pdf_timeout_seconds: int = Field(default=60, ge=1, le=120)
 
     @property
     def database_url(self) -> URL:

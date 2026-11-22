@@ -62,7 +62,7 @@ class Document(Base):
 
     __table_args__ = (
         CheckConstraint("revision > 0", name="revision_positive"),
-        CheckConstraint("schema_version IN (1, 2)", name="schema_supported"),
+        CheckConstraint("schema_version IN (1, 2, 3)", name="schema_supported"),
         CheckConstraint("last_version_number >= 0", name="version_number_nonnegative"),
     )
 
@@ -103,5 +103,5 @@ class DocumentVersion(Base):
     __table_args__ = (
         UniqueConstraint("document_id", "number"),
         CheckConstraint("number > 0 AND document_revision > 0", name="numbers_positive"),
-        CheckConstraint("schema_version IN (1, 2)", name="schema_supported"),
+        CheckConstraint("schema_version IN (1, 2, 3)", name="schema_supported"),
     )

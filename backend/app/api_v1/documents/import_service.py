@@ -27,7 +27,7 @@ async def apply_import(
     )
     previous = await service.add_snapshot(session, document, student.id, "Before DOCX import")
     document.content = result.content.stored()
-    document.schema_version = 2
+    document.schema_version = 3 if result.content.requires_v3() else 2
     document.revision += 1
     document.updated_at = await crud.database_now(session)
     version = await service.add_snapshot(session, document, student.id, "DOCX import")

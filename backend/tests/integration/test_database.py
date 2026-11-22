@@ -60,7 +60,7 @@ def test_migration_round_trip(integration_settings: Settings) -> None:
 
     run_alembic(integration_settings, "upgrade", "head")
     assert asyncio.run(database_state()) == (
-        "0007_docx_import",
+        "0008_semantic_captions",
         {
             "users",
             "auth_sessions",

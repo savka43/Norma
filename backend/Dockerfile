@@ -10,6 +10,9 @@ ENV UV_COMPILE_BYTECODE=1 \
     PATH="/app/.venv/bin:$PATH"
 
 WORKDIR /app
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libreoffice-writer fonts-liberation fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-dev
 COPY app ./app

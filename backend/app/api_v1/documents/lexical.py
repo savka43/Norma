@@ -8,12 +8,12 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from app.core.validation import validate_stored_text
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 MAX_CONTENT_BYTES = 2 * 1024 * 1024
 MAX_CONTENT_OBJECTS = 50_000
 MAX_JSON_DEPTH = 64
 type VersionOne = Annotated[int, Field(strict=True, ge=1, le=1)]
-type SchemaVersion = Annotated[int, Field(strict=True, ge=1, le=2)]
+type SchemaVersion = Annotated[int, Field(strict=True, ge=1, le=3)]
 type TextFormat = Annotated[int, Field(strict=True, ge=0, le=2047)]
 
 
@@ -63,6 +63,12 @@ class HeadingNode(Element):
     children: list[InlineNode]
 
 
+class CaptionNode(Element):
+    type: Literal["norma-caption"]
+    kind: Literal["figure", "table"]
+    children: list[InlineNode]
+
+
 class QuoteNode(Element):
     type: Literal["quote"]
     children: list[InlineNode]
@@ -91,7 +97,7 @@ class ListNode(Element):
 
 
 type TextBlockNode = Annotated[
-    ParagraphNode | HeadingNode | QuoteNode | ListNode, Field(discriminator="type")
+    ParagraphNode | HeadingNode | CaptionNode | QuoteNode | ListNode, Field(discriminator="type")
 ]
 
 
@@ -122,7 +128,8 @@ class TableNode(Element):
 
 
 type BlockNode = Annotated[
-    ParagraphNode | HeadingNode | QuoteNode | ListNode | TableNode, Field(discriminator="type")
+    ParagraphNode | HeadingNode | CaptionNode | QuoteNode | ListNode | TableNode,
+    Field(discriminator="type"),
 ]
 
 
@@ -173,6 +180,9 @@ class LexicalContent(BaseModel):
         return any(
             node.get("type") in ("table", "norma-image") for node in content_nodes(self.stored())
         )
+
+    def requires_v3(self) -> bool:
+        return any(node.get("type") == "norma-caption" for node in content_nodes(self.stored()))
 
 
 def content_nodes(content: dict[str, JsonValue]) -> list[dict[str, JsonValue]]:
