@@ -2,13 +2,21 @@ from datetime import timedelta
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api_v1.documents import crud
 from app.api_v1.documents.lexical import empty_content
 from app.api_v1.documents.schemas import DocumentSave, RestoreRequest, VersionCreate
 from app.api_v1.formatting import crud as formatting_crud
-from app.core.models import Document, DocumentEditLease, DocumentVersion, Thesis
+from app.core.models import (
+    Document,
+    DocumentEditLease,
+    DocumentVersion,
+    StageStatus,
+    Thesis,
+    ThesisStage,
+)
 
 
 async def require_template(session: AsyncSession, version_id: UUID, supervisor_id: UUID) -> None:
@@ -97,6 +105,7 @@ async def save_document(
     session: AsyncSession, document: Document, actor_id: UUID, lease_id: UUID, data: DocumentSave
 ) -> Document:
     await require_revision_and_lease(session, document, actor_id, lease_id, data.expected_revision)
+    await require_editable(session, document)
     thesis = await session.get(Thesis, document.thesis_id)
     assert thesis is not None
     await require_template(session, data.template_version_id, thesis.supervisor_id)
@@ -150,6 +159,7 @@ async def restore_version(
     session: AsyncSession, document: Document, actor_id: UUID, lease_id: UUID, data: RestoreRequest
 ) -> DocumentVersion:
     await require_revision_and_lease(session, document, actor_id, lease_id, data.expected_revision)
+    await require_editable(session, document)
     source = await crud.find_version(session, data.version_id, document.id)
     if source is None:
         raise HTTPException(404, "Document version not found")
@@ -163,3 +173,18 @@ async def restore_version(
     )
     await session.commit()
     return version
+
+
+async def require_editable(session: AsyncSession, document: Document) -> None:
+    # Caller holds the document lock; submit/decision also lock it before changing
+    # any status. With whole-document submissions there are no editable subregions.
+    reviewing = await session.scalar(
+        select(ThesisStage.id)
+        .where(
+            ThesisStage.thesis_id == document.thesis_id,
+            ThesisStage.status == StageStatus.IN_REVIEW,
+        )
+        .limit(1)
+    )
+    if reviewing is not None:
+        raise HTTPException(409, "Document is locked while a stage is in review")

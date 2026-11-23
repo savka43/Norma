@@ -1,6 +1,8 @@
 from fastapi import APIRouter
 
 from app.api_v1.auth.views import router as auth_router
+from app.api_v1.comments.views import router as comments_router
+from app.api_v1.documents.diff_views import router as document_diff_router
 from app.api_v1.documents.import_views import router as document_import_router
 from app.api_v1.documents.views import router as documents_router
 from app.api_v1.formatting.document_views import router as document_formatting_router
@@ -22,3 +24,5 @@ router.include_router(formatting_router)
 router.include_router(documents_router)
 router.include_router(document_import_router)
 router.include_router(document_formatting_router)
+router.include_router(document_diff_router)
+router.include_router(comments_router)

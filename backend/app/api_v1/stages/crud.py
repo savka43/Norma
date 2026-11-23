@@ -4,7 +4,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api_v1.supervisor_groups.schemas import PageParams
-from app.core.models import GroupMembership, StageEvent, Thesis, ThesisStage, User, UserRole
+from app.core.models import (
+    GroupMembership,
+    StageEvent,
+    StageSubmission,
+    Thesis,
+    ThesisStage,
+    User,
+    UserRole,
+)
 
 
 async def list_stages(session: AsyncSession, thesis_ids: list[UUID]) -> list[ThesisStage]:
@@ -43,6 +51,20 @@ async def list_history(
             select(StageEvent)
             .where(StageEvent.stage_id == stage_id)
             .order_by(StageEvent.thesis_revision, StageEvent.id)
+            .limit(params.limit)
+            .offset(params.offset)
+        )
+    )
+
+
+async def list_submissions(
+    session: AsyncSession, stage_id: UUID, params: PageParams
+) -> list[StageSubmission]:
+    return list(
+        await session.scalars(
+            select(StageSubmission)
+            .where(StageSubmission.stage_id == stage_id)
+            .order_by(StageSubmission.thesis_revision.desc())
             .limit(params.limit)
             .offset(params.offset)
         )

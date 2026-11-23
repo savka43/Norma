@@ -292,17 +292,76 @@ PDF создаётся LibreOffice из сгенерированного DOCX с
 Файлы экспорта не сохраняются в БД; неизменяемые исходные версии сохраняются.
 Подробности — [ADR-012](../decisions/ADR-012-formatting-and-export.md).
 
+## Проверка этапов (backend фазы 6)
+
+Все пути имеют префикс `/api/v1`; auth/CSRF действуют как для остальных API.
+Чужая и отсутствующая сущность дают одинаковый `404`, неверная роль — `403`.
+Устаревшая ревизия/версия/статус/lease — `409`, некорректное тело — `422`.
+
+| Метод / путь | Тело и результат |
+|---|---|
+| `POST /stages/{stage_id}/submit` | Студент; `{expected_revision, expected_document_revision, comment?}` + `X-Edit-Lease` → `201 {stage, revision, event}`; новый immutable snapshot и отправка |
+| `POST /stages/{stage_id}/request-changes` | Руководитель; `{expected_revision, submitted_version_id, comment?}` → `200 {stage, revision, event}` |
+| `POST /stages/{stage_id}/confirm` | Руководитель; такое же тело → `completed`, явное подтверждение проверенной версии |
+| `POST /stages/{stage_id}/resume` | Студент; такое же тело → `changes_requested → in_progress`; прежняя отправка остаётся в истории |
+| `GET /stages/{stage_id}/submissions?limit=50&offset=0` | Студент/руководитель ВКР; `{items, limit, offset}`, новые отправки первыми |
+| `GET /stages/{stage_id}/history` | Прежняя пагинация; теперь включает отправки и решения со ссылками на версии |
+
+`expected_revision` относится к ВКР, `expected_document_revision` — к документу.
+Каждый переход увеличивает ревизию ВКР на 1; отправка увеличивает счётчик версий
+документа, его content/revision остаются прежними. `StageResponse` дополнен
+nullable `submitted_version_id`. `StageEventResponse` дополнен nullable `version_id`
+и `reason` (пояснение из `comment`). Виды событий: `created|updated|submitted|changes_requested|confirmed|resumed`.
+`SubmissionResponse`: `id, stage_id, version_id, submitted_by_id, thesis_revision, created_at`.
+Проверяемый JSON и параметры шаблона читаются через существующий API версий.
+
+Разрешены `in_progress/changes_requested → in_review`, решения из `in_review`,
+отдельный resume после возврата. `completed` терминален. Замечания необязательны
+и не подтверждают этап автоматически. Ненулевой план обязателен.
+
+Сейчас отправляется весь документ: пока **любой** этап `in_review`, PUT документа,
+restore, DOCX import и apply-formatting дают `409`; чтение, snapshot и экспорт
+разрешены. Другие главы пока нельзя редактировать отдельно: модели областей нет.
+После возврата/решения по всем проверяемым этапам правки вновь доступны.
+Подробности блокировок и границы — [ADR-013](../decisions/ADR-013-stage-review-comments-diff.md).
+
+## Замечания и diff (backend фазы 6)
+
+| Метод / путь | Тело и результат |
+|---|---|
+| `POST /document-versions/{version_id}/comments` | Руководитель этой ВКР; `{body, quote, anchor}` → `201 CommentResponse` |
+| `GET /document-versions/{version_id}/comments` | Студент/руководитель ВКР; query `limit=50, offset=0, include_resolved=false, include_detached=false` → `{items, limit, offset}` |
+| `GET /comments/{comment_id}` | Замечание, включая закрытое/потерявшее привязку, по правам |
+| `PATCH /comments/{comment_id}` | Студент/руководитель ВКР; `{status: "resolved", expected_revision}` → `CommentResponse`; только `open → resolved` |
+| `GET /comments/{comment_id}/history?limit=50&offset=0` | `{items, limit, offset}`; создание/закрытие, актёр и ревизия |
+| `GET /documents/{document_id}/diff?base={version_id}&target={version_id}` | Студент/руководитель ВКР; только версии этого документа → `DiffResponse` |
+
+`CommentResponse`: `id, version_id, author_id, body, quote, anchor, status, revision,
+created_at, current_anchor, is_detached`. Текст замечания — 1..10000 символов после
+trim, цитата — 1..10000 без trim. Неизменяемый `anchor`:
+`{block_id: "3/0/0/0", offset_start: 0, offset_end: 6}`. Путь — индексы children
+в исходной версии, диапазон — UTF-16 units в тексте одного семантического блока.
+Изображение в тексте — U+FFFC, linebreak — `\n`. Backend проверяет цитату и границы.
+Ссылка на исходную версию остаётся доступной, даже если `current_anchor=null`.
+Для просмотра всех замечаний нужны оба флага `include_resolved=true&include_detached=true`.
+Фильтрация выполняется до пагинации; порядок — создание, UUID.
+История содержит `id, comment_id, actor_id, revision, status, created_at`.
+Изменение текста/цитаты/anchor, удаление и повторное открытие не предусмотрены.
+
+Diff содержит `base_version_id, target_version_id, template_changed, schema_changed,
+root_changed, move_detection: "not_performed", changes`. Элемент changes:
+`{kind, before, after, text_changes}`; `kind=equal|added|removed|changed`.
+before/after nullable: `{block_id, kind, text, node}`; `node` — полный исходный
+JSON top-level блока. `text_changes`: `{kind, before, after}` с сохранением всего
+удалённого текста. Перемещения — удаление/добавление; картинки и структура
+таблиц доступны в node. Лимиты: 2 000 000 пар блоков → иначе `422`; общий бюджет
+посимвольного diff 1 000 000 пар → целые changed-фрагменты без усечения.
+Чтение замечаний, истории и diff возвращает `Cache-Control: no-store`.
+
 ## Планируемые бизнес-маршруты
 
 | Модуль | Метод / путь | Сценарий |
 |---|---|---|
-| stages | `POST /stages/{id}/submit` | `in_progress/changes_requested → in_review`, immutable `DocumentVersion` |
-| stages | `POST /stages/{id}/request-changes` | `in_review → changes_requested`, комментарии остаются в истории |
-| stages | `POST /stages/{id}/confirm` | `in_review → completed`, только руководитель |
-| stages | Расширение `GET /stages/{id}/history` | История отправок и решений вместе с версиями документа |
-| documents | `GET /documents/{id}/diff?base={version_id}&target={version_id}` | UC-06, подсветка added/removed/changed |
-| comments | `GET /document-versions/{id}/comments?include_resolved=false` | Замечания с фильтрацией |
-| comments | `POST /document-versions/{id}/comments`, `PATCH /comments/{id}` | UC-10, статус/цитата/anchor |
 | plagiarism | `POST /document-versions/{id}/plagiarism-checks` | UC-03, создать долговечное задание |
 | plagiarism | `GET /plagiarism-checks/{id}`, `GET /plagiarism-checks/{id}/report` | Статус и отчёт при доступности |
 

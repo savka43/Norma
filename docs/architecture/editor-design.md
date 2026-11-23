@@ -1,7 +1,8 @@
 # Технический дизайн редактора на Lexical
 
 **Статус:** целевая архитектура с проверяемыми рисками. Реализован backend хранения,
-ревизий, lease и контрольных версий (ADR-010), импорт DOCX (ADR-011);
+ревизий, lease и контрольных версий (ADR-010), импорт DOCX (ADR-011),
+экспорт/оформление (ADR-012), workflow/замечания/diff (ADR-013);
 frontend/layout ниже ещё не реализованы.
 Сверяться с `docs/requirements/editor.md` и ADR-001.
 
@@ -90,9 +91,23 @@ python-docx используется только для генерации си
 ## Комментарии, diff, права и сохранение
 
 - User edit lease и `expected_revision` проверяются в backend; при `409` текущий локальный текст не выбрасывать.
-- Комментарий: immutable `version_id`, quote, anchor `{block_id, offset_start, offset_end}`, статус `open/resolved`; при потере привязки `detached`. Нельзя менять исходную цитату, даже если документ поменялся.
-- Diff для двух immutable `DocumentVersion`: структура и текст, added/removed/changed; move detection — опционально best-effort. История комментариев относится к исходной версии.
-- Этап ссылается на `submitted_version_id`; подтверждение руководителем относится к этой версии и событию проверки, а не к последнему автосохранению.
+- Реализован backend замечаний: immutable `version_id`, body/quote/anchor
+  `{block_id, offset_start, offset_end}`, статус `open/resolved` с ревизией/историей.
+  `block_id` — путь children исходной версии, offsets — UTF-16 units; frontend
+  должен переводить selection Lexical в этот формат. Глобальные UUID узлов не
+  добавлялись. При потере/неоднозначности цитаты `current_anchor=null`,
+  `is_detached=true`; источник сохраняется. Закрытые и detached скрыты по умолчанию.
+- Реализован API diff двух immutable версий одного документа: структура и текст,
+  equal/added/removed/changed, полные before/after; переносы показаны удалением и
+  добавлением. UI подсветки ещё нет. Лимиты вычисления — ADR-013/API-контракт.
+- Этап ссылается на `submitted_version_id`; решение руководителя называет эту
+  версию и ожидаемую ревизию ВКР. Каждый submit создаёт новый снимок. Пока этап
+  не сопоставлен области документа, проверяется весь документ и замена рабочего
+  текста/шаблона блокируется при любом `in_review`. Редактирование других глав
+  требует отдельной модели областей и в этом backend-инкременте отсутствует.
+
+Детали реализации — [ADR-013](../decisions/ADR-013-stage-review-comments-diff.md).
+Поддержка backend не означает готовности CommentsPanel/VersionDiffViewer и E2E.
 
 ## Проверки
 

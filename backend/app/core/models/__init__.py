@@ -1,5 +1,6 @@
 from app.core.models.auth_session import AuthSession
 from app.core.models.base import Base
+from app.core.models.comment import Comment, CommentEvent
 from app.core.models.document import (
     Document,
     DocumentEditLease,
@@ -9,7 +10,7 @@ from app.core.models.document import (
 )
 from app.core.models.document_import import DocumentAsset, DocumentImport
 from app.core.models.supervisor_group import GroupMembership, SupervisorGroup
-from app.core.models.thesis import StageEvent, StageStatus, Thesis, ThesisStage
+from app.core.models.thesis import StageEvent, StageStatus, StageSubmission, Thesis, ThesisStage
 from app.core.models.user import User, UserRole
 
 __all__ = [
@@ -23,6 +24,9 @@ __all__ = [
     "ThesisStage",
     "StageStatus",
     "StageEvent",
+    "StageSubmission",
+    "Comment",
+    "CommentEvent",
     "Document",
     "DocumentAsset",
     "DocumentImport",

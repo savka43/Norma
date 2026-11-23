@@ -36,6 +36,7 @@ async def apply_formatting(
     await document_service.require_revision_and_lease(
         session, document, actor_id, lease_id, data.expected_revision
     )
+    await document_service.require_editable(session, document)
     thesis = await session.get(Thesis, document.thesis_id)
     assert thesis is not None
     await document_service.require_template(session, data.template_version_id, thesis.supervisor_id)

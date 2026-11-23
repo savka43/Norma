@@ -25,6 +25,7 @@ async def apply_import(
     await service.require_revision_and_lease(
         session, document, student.id, lease_id, expected_revision
     )
+    await service.require_editable(session, document)
     previous = await service.add_snapshot(session, document, student.id, "Before DOCX import")
     document.content = result.content.stored()
     document.schema_version = 3 if result.content.requires_v3() else 2

@@ -59,6 +59,9 @@ class ThesisStage(Base):
         server_default=StageStatus.IN_PROGRESS.value,
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    submitted_version_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("document_versions.id", ondelete="RESTRICT")
+    )
 
     __table_args__ = (
         UniqueConstraint("thesis_id", "position", deferrable=True, initially="DEFERRED"),
@@ -77,6 +80,10 @@ class StageEvent(Base):
     actor_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
     thesis_revision: Mapped[int]
     kind: Mapped[str] = mapped_column(String(20))
+    version_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("document_versions.id", ondelete="RESTRICT")
+    )
+    reason: Mapped[str | None] = mapped_column(String(2000))
     before: Mapped[dict[str, str | int] | None] = mapped_column(
         JSONB(none_as_null=True), nullable=True
     )
@@ -86,9 +93,36 @@ class StageEvent(Base):
     __table_args__ = (
         UniqueConstraint("stage_id", "thesis_revision"),
         CheckConstraint("thesis_revision > 0", name="revision_positive"),
-        CheckConstraint("kind IN ('created', 'updated')", name="kind_allowed"),
         CheckConstraint(
-            "(kind = 'created' AND before IS NULL) OR (kind = 'updated' AND before IS NOT NULL)",
+            "kind IN ('created', 'updated', 'submitted', "
+            "'changes_requested', 'confirmed', 'resumed')",
+            name="kind_allowed",
+        ),
+        CheckConstraint(
+            "(kind = 'created' AND before IS NULL) OR (kind <> 'created' AND before IS NOT NULL)",
             name="before_matches_kind",
         ),
+        CheckConstraint(
+            "kind IN ('created', 'updated') OR version_id IS NOT NULL", name="workflow_version"
+        ),
+    )
+
+
+class StageSubmission(Base):
+    __tablename__ = "stage_submissions"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    stage_id: Mapped[UUID] = mapped_column(
+        ForeignKey("thesis_stages.id", ondelete="RESTRICT"), index=True
+    )
+    version_id: Mapped[UUID] = mapped_column(
+        ForeignKey("document_versions.id", ondelete="RESTRICT"), unique=True
+    )
+    submitted_by_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+    thesis_revision: Mapped[int]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("stage_id", "thesis_revision"),
+        CheckConstraint("thesis_revision > 0", name="revision_positive"),
     )

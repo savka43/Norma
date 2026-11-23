@@ -11,12 +11,15 @@ from app.core.models import StageEvent, StageStatus, Thesis, ThesisStage
 
 
 def stage_snapshot(stage: ThesisStage) -> dict[str, str | int]:
-    return {
+    result: dict[str, str | int] = {
         "name": stage.name,
         "position": stage.position,
         "due_date": stage.due_date.isoformat(),
         "status": stage.status.value,
     }
+    if stage.submitted_version_id is not None:
+        result["submitted_version_id"] = str(stage.submitted_version_id)
+    return result
 
 
 def stage_response(stage: ThesisStage, as_of: date) -> StageResponse:
@@ -29,6 +32,7 @@ def stage_response(stage: ThesisStage, as_of: date) -> StageResponse:
         status=stage.status,
         created_at=stage.created_at,
         is_overdue=stage.due_date < as_of and stage.status != StageStatus.COMPLETED,
+        submitted_version_id=stage.submitted_version_id,
     )
 
 

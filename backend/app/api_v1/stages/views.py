@@ -6,15 +6,21 @@ from fastapi import APIRouter, Query, Response, status
 
 from app.api_v1.auth.dependencies import SupervisorDep
 from app.api_v1.dependencies import SessionDep
-from app.api_v1.stages import crud, service
+from app.api_v1.documents.dependencies import LeaseIdDep, StudentDep
+from app.api_v1.stages import crud, service, workflow
 from app.api_v1.stages.dependencies import AccessibleStageDep, StagePlanForUpdateDep
 from app.api_v1.stages.schemas import (
     GroupProgressPage,
+    StageActionResponse,
+    StageDecision,
     StageEventResponse,
     StageHistoryPage,
     StagePage,
+    StageSubmit,
     StageWrite,
     StudentProgress,
+    SubmissionPage,
+    SubmissionResponse,
 )
 from app.api_v1.supervisor_groups.dependencies import OwnedGroupDep
 from app.api_v1.supervisor_groups.schemas import PageParams
@@ -24,6 +30,51 @@ from app.core.models import ThesisStage
 
 router = APIRouter(tags=["stages"])
 PageParamsDep = Annotated[PageParams, Query()]
+
+
+@router.post("/stages/{stage_id}/submit", status_code=201, responses={403: {}, 404: {}, 409: {}})
+async def submit_stage(
+    stage_id: UUID,
+    data: StageSubmit,
+    student: StudentDep,
+    lease_id: LeaseIdDep,
+    session: SessionDep,
+) -> StageActionResponse:
+    return await workflow.submit(session, stage_id, student, lease_id, data)
+
+
+@router.post("/stages/{stage_id}/request-changes", responses={403: {}, 404: {}, 409: {}})
+async def request_stage_changes(
+    stage_id: UUID, data: StageDecision, supervisor: SupervisorDep, session: SessionDep
+) -> StageActionResponse:
+    return await workflow.decide(session, stage_id, supervisor, data, "request-changes")
+
+
+@router.post("/stages/{stage_id}/confirm", responses={403: {}, 404: {}, 409: {}})
+async def confirm_stage(
+    stage_id: UUID, data: StageDecision, supervisor: SupervisorDep, session: SessionDep
+) -> StageActionResponse:
+    return await workflow.decide(session, stage_id, supervisor, data, "confirm")
+
+
+@router.post("/stages/{stage_id}/resume", responses={403: {}, 404: {}, 409: {}})
+async def resume_stage(
+    stage_id: UUID, data: StageDecision, student: StudentDep, session: SessionDep
+) -> StageActionResponse:
+    return await workflow.decide(session, stage_id, student, data, "resume")
+
+
+@router.get("/stages/{stage_id}/submissions", responses={404: {}})
+async def list_submissions(
+    stage: AccessibleStageDep, session: SessionDep, params: PageParamsDep, response: Response
+) -> SubmissionPage:
+    items = await crud.list_submissions(session, stage.id, params)
+    response.headers["Cache-Control"] = "no-store"
+    return SubmissionPage(
+        items=[SubmissionResponse.model_validate(item) for item in items],
+        limit=params.limit,
+        offset=params.offset,
+    )
 
 
 @router.get("/theses/{thesis_id}/stages", responses={404: {}})

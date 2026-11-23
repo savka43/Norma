@@ -4,6 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
+from app.api_v1.documents.schemas import VersionCreate
 from app.api_v1.theses.schemas import ThesisResponse
 from app.api_v1.users.schemas import StudentSummary
 from app.core.models import StageStatus
@@ -29,6 +30,7 @@ class StageResponse(BaseModel):
     status: StageStatus
     created_at: datetime
     is_overdue: bool
+    submitted_version_id: UUID | None = None
 
 
 class StagePage(BaseModel):
@@ -48,6 +50,8 @@ class StageEventResponse(BaseModel):
     before: dict[str, str | int] | None
     after: dict[str, str | int]
     created_at: datetime
+    version_id: UUID | None = None
+    reason: str | None = None
 
 
 class StageHistoryPage(BaseModel):
@@ -67,3 +71,33 @@ class GroupProgressPage(BaseModel):
     limit: int
     offset: int
     as_of_date: date
+
+
+class StageSubmit(VersionCreate):
+    expected_document_revision: int = Field(ge=1, le=2**31 - 2, strict=True)
+
+
+class StageDecision(VersionCreate):
+    submitted_version_id: UUID
+
+
+class StageActionResponse(BaseModel):
+    stage: StageResponse
+    revision: int
+    event: StageEventResponse
+
+
+class SubmissionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    stage_id: UUID
+    version_id: UUID
+    submitted_by_id: UUID
+    thesis_revision: int
+    created_at: datetime
+
+
+class SubmissionPage(BaseModel):
+    items: list[SubmissionResponse]
+    limit: int
+    offset: int
