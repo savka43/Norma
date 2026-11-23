@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { lazy, Suspense } from 'react'
 import {
   Link,
   Navigate,
@@ -18,6 +19,10 @@ import { useApi } from './shared/api/queries'
 import type { User } from './shared/api/types'
 import { Button, ErrorNotice, Notice } from './shared/ui/Ui'
 import styles from './App.module.css'
+
+const DocumentEditor = lazy(
+  () => import('./features/document-editor/DocumentEditor'),
+)
 
 function Shell({ user }: { user: User }) {
   const queryClient = useQueryClient()
@@ -134,6 +139,16 @@ export default function App() {
           path="works/:thesisId"
           element={<ThesisPage role={user.role} />}
         />
+        {user.role === 'student' && (
+          <Route
+            path="works/:thesisId/edit"
+            element={
+              <Suspense fallback={<Notice>Открываем редактор…</Notice>}>
+                <DocumentEditor userId={user.id} />
+              </Suspense>
+            }
+          />
+        )}
         <Route
           path="works/:thesisId/versions/:versionId"
           element={<VersionPage role={user.role} />}

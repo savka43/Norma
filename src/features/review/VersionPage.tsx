@@ -5,6 +5,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { download, send } from '../../shared/api/client'
 import { invalidatePaths, useApi } from '../../shared/api/queries'
 import type {
+  Document,
   Stage,
   StagePlan,
   Thesis,
@@ -14,6 +15,7 @@ import type {
 import { Button, date, ErrorNotice, Notice, Panel } from '../../shared/ui/Ui'
 import w from '../../shared/ui/Workspace.module.css'
 import { useDocument } from '../theses/ThesisPage'
+import { withLease } from '../theses/documents'
 import { Comments } from './Comments'
 import { Plagiarism } from './Plagiarism'
 import styles from './Review.module.css'
@@ -105,12 +107,16 @@ function Snapshot({
   stage,
   plan,
   student,
+  document: workingDocument,
 }: {
   version: Version
   stage?: Stage
   plan?: StagePlan
   student: boolean
+  document: Document
 }) {
+  const client = useQueryClient()
+  const navigate = useNavigate()
   const blocks = useMemo(() => textBlocks(version.content), [version.content])
   const [selected, setSelected] = useState<string | null>(null)
   const exported = useMutation({
@@ -120,6 +126,27 @@ function Snapshot({
         { format },
         `ВКР — версия ${version.number}.${format}`,
       ),
+  })
+  const restore = useMutation({
+    mutationFn: () =>
+      withLease(workingDocument.id, (headers) =>
+        send<{ document: Document; version: Version }>(
+          `/documents/${workingDocument.id}/restore`,
+          {
+            method: 'POST',
+            headers,
+            json: {
+              version_id: version.id,
+              expected_revision: workingDocument.revision,
+            },
+          },
+        ),
+      ),
+    onSuccess: async ({ document: saved }) => {
+      client.setQueryData([`/theses/${saved.thesis_id}/document`], saved)
+      await invalidatePaths(client, `/documents/${saved.id}/versions`)
+      void navigate(`/works/${saved.thesis_id}/edit`)
+    },
   })
   return (
     <div className={w.columns}>
@@ -146,6 +173,22 @@ function Snapshot({
           }
         >
           <ErrorNotice error={exported.error} />
+          {student && (
+            <details>
+              <summary>Восстановить версию</summary>
+              <p>
+                Рабочий текст будет заменён. В истории появится новая версия.
+              </p>
+              <ErrorNotice error={restore.error} />
+              <Button
+                variant="secondary"
+                disabled={restore.isPending}
+                onClick={() => restore.mutate()}
+              >
+                Подтвердить восстановление
+              </Button>
+            </details>
+          )}
           {!blocks.length && <p>В версии нет текста.</p>}
           <div className={styles.snapshot}>
             {blocks.map((block) => (
@@ -234,13 +277,14 @@ export function VersionPage({ role }: { role: User['role'] }) {
       {(document.data === null || (version.data && !snapshot)) && (
         <Notice error>Версия этой работы не найдена.</Notice>
       )}
-      {snapshot && (
+      {snapshot && document.data && (
         <Snapshot
           key={snapshot.id}
           version={snapshot}
           stage={stage}
           plan={plan.data}
           student={role === 'student'}
+          document={document.data}
         />
       )}
     </div>

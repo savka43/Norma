@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 from uuid import uuid4
 from zipfile import ZipFile
 
-from playwright.sync_api import Browser, Page, expect, sync_playwright
+from playwright.sync_api import Browser, Locator, Page, expect, sync_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "backend/tests/fixtures/synthetic-import.docx"
@@ -42,6 +42,201 @@ def upload(page: Page, source: Path) -> None:
     page.get_by_label("Заменить рабочий документ", exact=False).check()
     page.get_by_role("button", name="Загрузить DOCX").click()
     expect(page.get_by_text("Загружена версия", exact=False)).to_be_visible()
+
+
+def place_caret_at_end(block: Locator) -> None:
+    block.evaluate("""node => {
+        node.closest('[contenteditable]').focus();
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        range.collapse(false);
+        window.getSelection().removeAllRanges();
+        window.getSelection().addRange(range);
+    }""")
+
+
+def check_editor(page: Page, base: str, directory: Path) -> None:
+    work_url = page.url
+    thesis_id = urlparse(work_url).path.split("/")[-1]
+    document_path = f"{base}/api/v1/theses/{thesis_id}/document"
+    document = page.request.get(document_path).json()
+    path = f"{base}/api/v1/documents/{document['id']}"
+    csrf = {"X-CSRF-Protection": "1"}
+    errors: list[str] = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+
+    with page.expect_response(
+        lambda response: (
+            response.url == f"{path}/edit-lease" and response.request.method == "POST"
+        )
+    ) as first_lease:
+        page.get_by_role("link", name="Открыть редактор").click()
+    lease_id = first_lease.value.json()["lease_id"]
+    root = page.get_by_role("textbox", name="Текст ВКР")
+    position = page.get_by_test_id("page-position")
+    saved = page.get_by_role("status").filter(has_text="Сохранено")
+    expect(root).to_have_attribute("contenteditable", "true")
+    expect(position).to_have_text("Лист 1 из 1")
+    expect(root.locator("table")).to_be_visible()
+    expect(root.locator("img").first).to_be_visible()
+
+    section_text = "Экспериментальный абзац. " * 150
+    place_caret_at_end(root.locator(":scope > p").last)
+    page.keyboard.press("Enter")
+    page.keyboard.insert_text(section_text)
+    paragraph = root.locator(":scope > p").last
+    expect(paragraph).to_contain_text("Экспериментальный абзац.")
+    expect(position).not_to_have_text("Лист 1 из 1")
+    assert paragraph.evaluate("node => node.getClientRects().length") > 1
+    expect(saved).to_be_visible()
+    previous = page.get_by_role("button", name="Предыдущий лист")
+    next_sheet = page.get_by_role("button", name="Следующий лист")
+    visible_page = position.inner_text()
+    (previous if previous.is_enabled() else next_sheet).click()
+    expect(position).not_to_have_text(visible_page)
+    page.screenshot(path=directory / "editor-pages.png", full_page=True)
+
+    # Select one DOM range that spans multiple physical columns and remove it.
+    selected_columns = paragraph.evaluate("""node => {
+        const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+        const start = walker.nextNode();
+        let last = start;
+        while (walker.nextNode()) last = walker.currentNode;
+        const range = document.createRange();
+        range.setStart(start, 3);
+        range.setEnd(last, last.length - 3);
+        window.getSelection().removeAllRanges();
+        window.getSelection().addRange(range);
+        return new Set([...range.getClientRects()].map(rect => Math.round(rect.left))).size;
+    }""")
+    assert selected_columns > 1
+    page.keyboard.press("Backspace")
+    expect(position).to_have_text("Лист 1 из 1")
+    expect(saved).to_be_visible()
+    page.get_by_role("button", name="Отменить", exact=True).click()
+    expect(paragraph).to_contain_text(section_text[:500])
+    expect(position).not_to_have_text("Лист 1 из 1")
+    expect(saved).to_be_visible()
+
+    second = page.context.new_page()
+    second.goto(page.url)
+    expect(second.get_by_role("button", name="Получить доступ")).to_be_visible()
+    expect(second.get_by_role("textbox", name="Текст ВКР")).to_have_attribute(
+        "contenteditable", "false"
+    )
+    second.close()
+
+    # Simulate another writer on the real API after the editor loses its lease.
+    released = page.request.delete(
+        f"{path}/edit-lease", headers={**csrf, "X-Edit-Lease": lease_id}
+    )
+    assert released.status == 204, released.text()
+    external = page.request.post(f"{path}/edit-lease", headers=csrf).json()
+    external_headers = {**csrf, "X-Edit-Lease": external["lease_id"]}
+    fresh = page.request.get(document_path).json()
+    server_version = "Серверная редакция в другой вкладке"
+    fresh["content"]["root"]["children"].append(
+        {
+            "type": "paragraph",
+            "version": 1,
+            "direction": None,
+            "format": "",
+            "indent": 0,
+            "children": [
+                {
+                    "type": "text",
+                    "text": server_version,
+                    "version": 1,
+                    "style": "",
+                    "format": 0,
+                    "mode": "normal",
+                    "detail": 0,
+                }
+            ],
+        }
+    )
+    written = page.request.put(
+        path,
+        headers=external_headers,
+        data={
+            "content": fresh["content"],
+            "schema_version": fresh["schema_version"],
+            "template_version_id": fresh["template_version_id"],
+            "expected_revision": fresh["revision"],
+        },
+    )
+    assert written.ok, written.text()
+    assert (
+        page.request.delete(f"{path}/edit-lease", headers=external_headers).status
+        == 204
+    )
+    place_caret_at_end(paragraph)
+    local_text = "Черновик после конфликта вкладок"
+    page.keyboard.press("Enter")
+    page.keyboard.insert_text(local_text)
+    expect(page.get_by_text("Сохранение приостановлено", exact=True)).to_be_visible()
+    page.get_by_role("button", name="Перечитать с сервера").click()
+    expect(root).to_contain_text(server_version)
+    expect(root).not_to_contain_text(local_text)
+    page.get_by_role("button", name="Восстановить черновик").click()
+    expect(root).to_contain_text(local_text)
+    expect(saved).to_be_visible()
+
+    page.get_by_role("button", name="Сохранить версию").click()
+    version = page.get_by_role("link", name="версия №", exact=False).first
+    expect(version).to_be_visible()
+    version_url = version.get_attribute("href")
+    assert version_url
+    page.reload()
+    expect(root).to_have_attribute("contenteditable", "true")
+    expect(root).to_contain_text(local_text)
+
+    place_caret_at_end(root.locator(":scope > p").last)
+    page.keyboard.press("Enter")
+    page.keyboard.insert_text("Добавлено в редакторе")
+    page.get_by_label("Стиль блока").select_option("h2")
+    expect(root.locator("h2").last).to_have_text("Добавлено в редакторе")
+    page.get_by_role("button", name="Таблица", exact=True).click()
+    expect(root.locator("table")).to_have_count(2)
+    with ZipFile(FIXTURE) as fixture:
+        image = fixture.read(
+            next(name for name in fixture.namelist() if name.startswith("word/media/"))
+        )
+    with page.expect_file_chooser() as chooser:
+        page.get_by_role("button", name="Изображение", exact=True).click()
+    chooser.value.set_files(
+        {"name": "figure.png", "mimeType": "image/png", "buffer": image}
+    )
+    expect(root.get_by_role("img", name="figure.png")).to_be_visible()
+    expect(saved).to_be_visible()
+
+    viewport = page.viewport_size
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.get_by_label("Масштаб").select_option("fit")
+    assert page.evaluate("document.documentElement.scrollWidth === innerWidth")
+    page.screenshot(path=directory / "editor-mobile.png", full_page=True)
+    if viewport:
+        page.set_viewport_size(viewport)
+    with page.expect_response(
+        lambda response: (
+            response.url == f"{path}/edit-lease" and response.request.method == "DELETE"
+        )
+    ):
+        page.get_by_role("link", name="К работе").click()
+    page.goto(base + version_url)
+    page.get_by_text("Восстановить версию", exact=True).click()
+    page.get_by_role("button", name="Подтвердить восстановление").click()
+    expect(root).to_have_attribute("contenteditable", "true")
+    expect(root).to_contain_text(local_text)
+    expect(root).not_to_contain_text("Добавлено в редакторе")
+    with page.expect_response(
+        lambda response: (
+            response.url == f"{path}/edit-lease" and response.request.method == "DELETE"
+        )
+    ):
+        page.get_by_role("link", name="К работе").click()
+    expect(page.get_by_role("link", name="Открыть редактор")).to_be_visible()
+    assert not errors, errors
 
 
 def accept(browser: Browser, args: argparse.Namespace, directory: Path) -> None:
@@ -112,6 +307,9 @@ def accept(browser: Browser, args: argparse.Namespace, directory: Path) -> None:
     user.get_by_label("Шаблон оформления").select_option(label="ГОСТ 7.32-2017")
     user.get_by_role("button", name="Создать документ").click()
     upload(user, first_doc)
+    if args.editor:
+        check_editor(user, args.base, directory)
+        upload(user, first_doc)
     user.get_by_role("button", name="Отправить на проверку").click()
     expect(user.get_by_text("На проверке", exact=True)).to_be_visible()
     user.screenshot(path=directory / "student.png", full_page=True)
@@ -250,6 +448,7 @@ def main() -> None:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--live-plagiarism", action="store_true")
     parser.add_argument("--pdf", action="store_true")
+    parser.add_argument("--editor", action="store_true")
     args = parser.parse_args()
     directory = args.output or Path(tempfile.mkdtemp(prefix="norma-cabinets-"))
     directory.mkdir(parents=True, exist_ok=True)

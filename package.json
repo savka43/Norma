@@ -14,8 +14,14 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@lexical/list": "0.53.0",
+    "@lexical/react": "0.53.0",
+    "@lexical/rich-text": "0.53.0",
+    "@lexical/selection": "0.53.0",
+    "@lexical/table": "0.53.0",
     "@tanstack/react-form": "^1.33.5",
     "@tanstack/react-query": "^5.108.3",
+    "lexical": "0.53.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router-dom": "^7.18.6"

@@ -206,7 +206,7 @@ function VersionList({
             <p>
               {offset
                 ? 'На этой странице нет версий.'
-                : 'Версии появятся после загрузки DOCX или отправки этапа.'}
+                : 'Версии появятся после сохранения из редактора, загрузки DOCX или отправки этапа.'}
             </p>
           )}
           <ul className={w.list}>
@@ -255,7 +255,10 @@ export function DocumentPanel({
   return (
     <div className={w.stack}>
       {canEdit && (
-        <Panel title="Рабочий документ">
+        <Panel
+          title="Рабочий документ"
+          action={<Link to={`/works/${thesisId}/edit`}>Открыть редактор</Link>}
+        >
           {locked ? (
             <p>
               Документ на проверке. Загрузка доступна после решения по всем
