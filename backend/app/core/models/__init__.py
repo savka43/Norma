@@ -9,6 +9,7 @@ from app.core.models.document import (
     FormattingTemplateVersion,
 )
 from app.core.models.document_import import DocumentAsset, DocumentImport
+from app.core.models.plagiarism import CheckStatus, PlagiarismCheck
 from app.core.models.supervisor_group import GroupMembership, SupervisorGroup
 from app.core.models.thesis import StageEvent, StageStatus, StageSubmission, Thesis, ThesisStage
 from app.core.models.user import User, UserRole
@@ -34,4 +35,6 @@ __all__ = [
     "DocumentVersion",
     "FormattingTemplate",
     "FormattingTemplateVersion",
+    "CheckStatus",
+    "PlagiarismCheck",
 ]

@@ -52,6 +52,10 @@ def utf16_length(text: str) -> int:
     return len(text.encode("utf-16-le")) // 2
 
 
+def document_text(content: dict[str, JsonValue]) -> str:
+    return "\n".join(block.text for block in semantic_blocks(content))
+
+
 def utf16_slice(text: str, start: int, end: int) -> str | None:
     data = text.encode("utf-16-le")
     if not 0 <= start < end <= len(data) // 2:

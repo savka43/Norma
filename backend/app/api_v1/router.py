@@ -8,6 +8,7 @@ from app.api_v1.documents.views import router as documents_router
 from app.api_v1.formatting.document_views import router as document_formatting_router
 from app.api_v1.formatting.views import router as formatting_router
 from app.api_v1.health.views import router as health_router
+from app.api_v1.plagiarism.views import router as plagiarism_router
 from app.api_v1.stages.views import router as stages_router
 from app.api_v1.supervisor_groups.views import router as groups_router
 from app.api_v1.theses.views import router as theses_router
@@ -26,3 +27,4 @@ router.include_router(document_import_router)
 router.include_router(document_formatting_router)
 router.include_router(document_diff_router)
 router.include_router(comments_router)
+router.include_router(plagiarism_router)

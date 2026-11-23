@@ -45,7 +45,7 @@ def test_migration_round_trip(integration_settings: Settings) -> None:
                         "'documents', 'document_edit_leases', 'document_versions', "
                         "'formatting_templates', 'formatting_template_versions', "
                         "'document_imports', 'document_assets', 'stage_submissions', "
-                        "'comments', 'comment_events')"
+                        "'comments', 'comment_events', 'plagiarism_checks')"
                     )
                 )
                 roles = await connection.scalars(
@@ -61,7 +61,7 @@ def test_migration_round_trip(integration_settings: Settings) -> None:
 
     run_alembic(integration_settings, "upgrade", "head")
     assert asyncio.run(database_state()) == (
-        "0009_stage_review",
+        "0010_plagiarism_checks",
         {
             "users",
             "auth_sessions",
@@ -80,6 +80,7 @@ def test_migration_round_trip(integration_settings: Settings) -> None:
             "stage_submissions",
             "comments",
             "comment_events",
+            "plagiarism_checks",
         },
         ["student", "supervisor"],
     )

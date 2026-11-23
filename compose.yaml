@@ -17,6 +17,15 @@ x-api: &api
     NORMA_DOCUMENT_LEASE_SECONDS: ${NORMA_DOCUMENT_LEASE_SECONDS:-120}
     NORMA_PDF_CONVERTER: ${NORMA_PDF_CONVERTER:-libreoffice}
     NORMA_PDF_TIMEOUT_SECONDS: ${NORMA_PDF_TIMEOUT_SECONDS:-60}
+    NORMA_PLAGIARISM_ENABLED: ${NORMA_PLAGIARISM_ENABLED:-false}
+    NORMA_PLAGIARISM_WSDL_URL: ${NORMA_PLAGIARISM_WSDL_URL:-https://api.antiplagiat.ru:4959/apiCorp/testapi?wsdl}
+    NORMA_PLAGIARISM_SITE_URL: ${NORMA_PLAGIARISM_SITE_URL:-https://testapi.antiplagiat.ru}
+    NORMA_PLAGIARISM_LOGIN: ${NORMA_PLAGIARISM_LOGIN:-}
+    NORMA_PLAGIARISM_PASSWORD: ${NORMA_PLAGIARISM_PASSWORD:-}
+    NORMA_PLAGIARISM_REQUEST_TIMEOUT_SECONDS: ${NORMA_PLAGIARISM_REQUEST_TIMEOUT_SECONDS:-30}
+    NORMA_PLAGIARISM_POLL_SECONDS: ${NORMA_PLAGIARISM_POLL_SECONDS:-10}
+    NORMA_PLAGIARISM_CHECK_TIMEOUT_SECONDS: ${NORMA_PLAGIARISM_CHECK_TIMEOUT_SECONDS:-3600}
+    NORMA_PLAGIARISM_MAX_TEXT_BYTES: ${NORMA_PLAGIARISM_MAX_TEXT_BYTES:-}
 
 services:
   postgres:
@@ -59,6 +68,14 @@ services:
       timeout: 6s
       retries: 10
       start_period: 10s
+
+  worker:
+    <<: *api
+    command: ["python", "-m", "app.api_v1.plagiarism.worker"]
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
 
 volumes:
   postgres_data:
