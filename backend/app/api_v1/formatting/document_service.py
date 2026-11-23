@@ -36,7 +36,8 @@ async def apply_formatting(
     await document_service.require_revision_and_lease(
         session, document, actor_id, lease_id, data.expected_revision
     )
-    await document_service.require_editable(session, document)
+    content = normalize(document.content)
+    await document_service.require_editable(session, document, content, data.template_version_id)
     thesis = await session.get(Thesis, document.thesis_id)
     assert thesis is not None
     await document_service.require_template(session, data.template_version_id, thesis.supervisor_id)
@@ -45,7 +46,7 @@ async def apply_formatting(
     previous = await document_service.add_snapshot(
         session, document, actor_id, "Before applying formatting template"
     )
-    document.content = normalize(document.content)
+    document.content = content
     document.template_version_id = data.template_version_id
     document.revision += 1
     document.updated_at = await document_crud.database_now(session)

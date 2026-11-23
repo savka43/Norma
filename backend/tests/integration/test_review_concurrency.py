@@ -28,7 +28,7 @@ from app.core.models import (
     User,
 )
 from app.main import create_app
-from tests.document_helpers import content, parameters
+from tests.document_helpers import content, parameters, text_block, with_blocks
 from tests.docx_helpers import docx, paragraph
 from tests.integration.actors import authenticate, make_actors, seed_actors
 from tests.integration.alembic_helpers import run_alembic
@@ -37,9 +37,20 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.mark.parametrize(
-    "operation", ["submit", "save", "import", "restore", "format", "decision", "resolve"]
+    "operation",
+    [
+        "submit",
+        "save",
+        "chapter-save",
+        "outside-save",
+        "import",
+        "restore",
+        "format",
+        "decision",
+        "resolve",
+    ],
 )
-def test_review_races_have_one_winner_and_preserve_history(
+def test_review_races_serialize_changes_and_preserve_history(
     migrated_database: None,
     integration_settings: Settings,
     operation: str,
@@ -167,6 +178,29 @@ def test_review_races_have_one_winner_and_preserve_history(
             stage_path = f"/api/v1/stages/{stage_id}"
             version_id, comment_id = "", ""
             document_revision = 1
+            chapter_contents = None
+            if operation in {"chapter-save", "outside-save"}:
+                chapter = text_block("Глава", tag="h1", stage_id=stage_id)
+                chapter_body = text_block("На проверку")
+                initial = with_blocks(text_block("Введение"), chapter, chapter_body)
+                updated = (
+                    with_blocks(text_block("Введение"), chapter, text_block("Правка главы"))
+                    if operation == "chapter-save"
+                    else with_blocks(text_block("Правка введения"), chapter, chapter_body)
+                )
+                chapter_contents = (initial, updated)
+                saved = first.put(
+                    base,
+                    headers=lease,
+                    json={
+                        "expected_revision": 1,
+                        "schema_version": 4,
+                        "template_version_id": template_id,
+                        "content": initial,
+                    },
+                )
+                assert saved.status_code == 200, saved.text
+                document_revision = 2
             if operation == "resolve":
                 saved = first.put(
                     base,
@@ -229,7 +263,21 @@ def test_review_races_have_one_winner_and_preserve_history(
                     return client.post(
                         f"{stage_path}/submit",
                         headers=lease,
-                        json={"expected_revision": 2, "expected_document_revision": 1},
+                        json={
+                            "expected_revision": 2,
+                            "expected_document_revision": document_revision,
+                        },
+                    ).status_code
+                if chapter_contents is not None:
+                    return client.put(
+                        base,
+                        headers=lease,
+                        json={
+                            "expected_revision": document_revision,
+                            "schema_version": 4,
+                            "template_version_id": template_id,
+                            "content": chapter_contents[1],
+                        },
                     ).status_code
                 if operation == "save":
                     return client.put(
@@ -269,6 +317,23 @@ def test_review_races_have_one_winner_and_preserve_history(
             with ThreadPoolExecutor(max_workers=2) as pool:
                 futures = [pool.submit(write, first, 0), pool.submit(write, second, 1)]
                 statuses = [future.result(timeout=30) for future in futures]
+            if chapter_contents is not None:
+                initial, updated = chapter_contents
+                allowed = [[409, 200], [201, 409 if operation == "chapter-save" else 200]]
+                assert statuses in allowed, statuses
+                submissions = first.get(f"{stage_path}/submissions").json()["items"]
+                assert len(submissions) == (1 if statuses[0] == 201 else 0)
+                if submissions:
+                    assert submissions[0]["scope"] == "chapter"
+                    pinned = first.get(f"/api/v1/document-versions/{submissions[0]['version_id']}")
+                    assert pinned.json()["content"] == initial
+                assert first.get(base).json()["content"] == (
+                    updated if statuses[1] == 200 else initial
+                )
+                if operation == "chapter-save":
+                    with pytest.raises(AssertionError, match="Cannot downgrade while schema v4"):
+                        run_alembic(integration_settings, "downgrade", "0010_plagiarism_checks")
+                return
             assert statuses.count(409) == 1, statuses
             assert sum(status in {200, 201} for status in statuses) == 1, statuses
             if operation == "resolve":

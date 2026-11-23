@@ -848,6 +848,14 @@ export interface components {
         };
         /** @enum {string} */
         ChangeKind: "equal" | "added" | "removed" | "changed";
+        /** ChapterState */
+        ChapterState: {
+            /**
+             * Normastageid
+             * Format: uuid
+             */
+            normaStageId: string;
+        };
         /** CheckCreate */
         CheckCreate: {
             /** Confirm Demo Document */
@@ -1291,6 +1299,7 @@ export interface components {
             tag: "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
             /** Children */
             children: components["schemas"]["InlineNode"][];
+            $?: components["schemas"]["ChapterState"] | null;
         };
         /** HealthResponse */
         HealthResponse: {
@@ -1973,6 +1982,11 @@ export interface components {
             submitted_by_id: string;
             /** Thesis Revision */
             thesis_revision: number;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "document" | "chapter";
             /**
              * Created At
              * Format: date-time

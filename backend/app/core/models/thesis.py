@@ -120,9 +120,11 @@ class StageSubmission(Base):
     )
     submitted_by_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
     thesis_revision: Mapped[int]
+    scope: Mapped[str] = mapped_column(String(8), server_default="document")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
         UniqueConstraint("stage_id", "thesis_revision"),
         CheckConstraint("thesis_revision > 0", name="revision_positive"),
+        CheckConstraint("scope IN ('document', 'chapter')", name="scope_allowed"),
     )

@@ -326,7 +326,7 @@ async def test_csrf_headers_and_missing_resources(
 @pytest.mark.parametrize(
     "changes",
     [
-        {"schema_version": 4},
+        {"schema_version": 5},
         {"schema_version": True},
         {"expected_revision": True},
         {"expected_revision": "1"},

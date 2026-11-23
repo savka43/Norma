@@ -8,12 +8,12 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from app.core.validation import validate_stored_text
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 MAX_CONTENT_BYTES = 2 * 1024 * 1024
 MAX_CONTENT_OBJECTS = 50_000
 MAX_JSON_DEPTH = 64
 type VersionOne = Annotated[int, Field(strict=True, ge=1, le=1)]
-type SchemaVersion = Annotated[int, Field(strict=True, ge=1, le=3)]
+type SchemaVersion = Annotated[int, Field(strict=True, ge=1, le=SCHEMA_VERSION)]
 type TextFormat = Annotated[int, Field(strict=True, ge=0, le=2047)]
 
 
@@ -57,10 +57,16 @@ class ParagraphNode(Element):
     children: list[InlineNode]
 
 
+class ChapterState(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    stage_id: UUID = Field(alias="normaStageId")
+
+
 class HeadingNode(Element):
     type: Literal["heading"]
     tag: Literal["h1", "h2", "h3", "h4", "h5", "h6"]
     children: list[InlineNode]
+    state: ChapterState | None = Field(default=None, alias="$")
 
 
 class CaptionNode(Element):
@@ -108,6 +114,12 @@ class TableCellNode(Element):
     rowSpan: VersionOne
     backgroundColor: None
     children: Annotated[list[TextBlockNode], Field(min_length=1)]
+
+    @model_validator(mode="after")
+    def reject_chapter_heading(self) -> Self:
+        if any(isinstance(node, HeadingNode) and node.state for node in self.children):
+            raise ValueError("Stage bindings cannot appear in table cells")
+        return self
 
 
 class TableRowNode(Element):
@@ -166,8 +178,30 @@ class LexicalContent(BaseModel):
             raise ValueError("Document size limit exceeded")
         return value
 
+    @model_validator(mode="after")
+    def validate_chapter_headings(self) -> Self:
+        seen: set[UUID] = set()
+        for node in self.root.children:
+            if not isinstance(node, HeadingNode) or node.state is None:
+                continue
+            if node.tag != "h1":
+                raise ValueError("Stage bindings require a top-level h1 heading")
+            if node.state.stage_id in seen:
+                raise ValueError("A stage can be bound to only one chapter")
+            seen.add(node.state.stage_id)
+        return self
+
     def stored(self) -> dict[str, JsonValue]:
-        return cast(dict[str, JsonValue], self.model_dump(mode="json", exclude_unset=True))
+        return cast(
+            dict[str, JsonValue], self.model_dump(mode="json", by_alias=True, exclude_unset=True)
+        )
+
+    def chapter_stage_ids(self) -> set[UUID]:
+        return {
+            node.state.stage_id
+            for node in self.root.children
+            if isinstance(node, HeadingNode) and node.state is not None
+        }
 
     def image_ids(self) -> set[UUID]:
         return {

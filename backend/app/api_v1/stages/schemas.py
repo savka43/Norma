@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
@@ -94,6 +94,7 @@ class SubmissionResponse(BaseModel):
     version_id: UUID
     submitted_by_id: UUID
     thesis_revision: int
+    scope: Literal["document", "chapter"]
     created_at: datetime
 
 

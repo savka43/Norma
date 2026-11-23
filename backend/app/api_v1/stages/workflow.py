@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api_v1.documents import service as document_service
+from app.api_v1.documents.chapters import chapter_blocks
 from app.api_v1.stages import crud, service
 from app.api_v1.stages.schemas import (
     StageActionResponse,
@@ -99,6 +100,7 @@ async def submit(
             version_id=version.id,
             submitted_by_id=user.id,
             thesis_revision=thesis.revision + 1,
+            scope="chapter" if stage.id in chapter_blocks(version.content) else "document",
         )
     )
     stage.submitted_version_id = version.id

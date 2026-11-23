@@ -42,6 +42,22 @@ def content(text: str = "Текст ВКР") -> dict[str, JsonValue]:
     )
 
 
+def with_blocks(*blocks: JsonValue) -> dict[str, JsonValue]:
+    document = content()
+    cast(dict[str, JsonValue], document["root"])["children"] = list(blocks)
+    return document
+
+
+def text_block(text: str, *, tag: str | None = None, stage_id: str | None = None) -> JsonValue:
+    root = cast(dict[str, JsonValue], content(text)["root"])
+    block = cast(dict[str, JsonValue], cast(list[JsonValue], root["children"])[0])
+    if tag is not None:
+        block.update(type="heading", tag=tag)
+    if stage_id is not None:
+        block["$"] = {"normaStageId": stage_id}
+    return block
+
+
 def parameters(font_size: int = 14) -> dict[str, JsonValue]:
     style: dict[str, JsonValue] = {
         "font_family": "Times New Roman",

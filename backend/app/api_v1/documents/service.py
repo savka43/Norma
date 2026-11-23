@@ -2,10 +2,12 @@ from datetime import timedelta
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException
+from pydantic import JsonValue
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api_v1.documents import crud
+from app.api_v1.documents.chapters import preserves_chapters
 from app.api_v1.documents.lexical import empty_content
 from app.api_v1.documents.schemas import DocumentSave, RestoreRequest, VersionCreate
 from app.api_v1.formatting import crud as formatting_crud
@@ -14,6 +16,7 @@ from app.core.models import (
     DocumentEditLease,
     DocumentVersion,
     StageStatus,
+    StageSubmission,
     Thesis,
     ThesisStage,
 )
@@ -105,14 +108,22 @@ async def save_document(
     session: AsyncSession, document: Document, actor_id: UUID, lease_id: UUID, data: DocumentSave
 ) -> Document:
     await require_revision_and_lease(session, document, actor_id, lease_id, data.expected_revision)
-    await require_editable(session, document)
+    content = data.content.stored()
+    await require_editable(session, document, content, data.template_version_id)
+    stage_ids = data.content.chapter_stage_ids()
+    if stage_ids:
+        matching = await session.scalars(
+            select(ThesisStage.id).where(ThesisStage.thesis_id == document.thesis_id)
+        )
+        if not stage_ids.issubset(matching):
+            raise HTTPException(422, "Chapter stages must belong to this thesis")
     thesis = await session.get(Thesis, document.thesis_id)
     assert thesis is not None
     await require_template(session, data.template_version_id, thesis.supervisor_id)
     asset_ids = data.content.image_ids()
     if await crud.find_asset_ids(session, document.id, asset_ids) != asset_ids:
         raise HTTPException(422, "Image assets must belong to this document")
-    document.content = data.content.stored()
+    document.content = content
     document.schema_version = data.schema_version
     document.template_version_id = data.template_version_id
     document.revision += 1
@@ -159,10 +170,10 @@ async def restore_version(
     session: AsyncSession, document: Document, actor_id: UUID, lease_id: UUID, data: RestoreRequest
 ) -> DocumentVersion:
     await require_revision_and_lease(session, document, actor_id, lease_id, data.expected_revision)
-    await require_editable(session, document)
     source = await crud.find_version(session, data.version_id, document.id)
     if source is None:
         raise HTTPException(404, "Document version not found")
+    await require_editable(session, document, source.content, source.template_version_id)
     document.content = source.content
     document.schema_version = source.schema_version
     document.template_version_id = source.template_version_id
@@ -175,16 +186,33 @@ async def restore_version(
     return version
 
 
-async def require_editable(session: AsyncSession, document: Document) -> None:
-    # Caller holds the document lock; submit/decision also lock it before changing
-    # any status. With whole-document submissions there are no editable subregions.
-    reviewing = await session.scalar(
-        select(ThesisStage.id)
-        .where(
-            ThesisStage.thesis_id == document.thesis_id,
-            ThesisStage.status == StageStatus.IN_REVIEW,
+async def require_editable(
+    session: AsyncSession,
+    document: Document,
+    content: dict[str, JsonValue] | None = None,
+    template_version_id: UUID | None = None,
+) -> None:
+    # Every writer and review transition holds the document lock. Comparing with
+    # the working draft therefore preserves the protected blocks from submission onward.
+    reviewing = (
+        await session.execute(
+            select(ThesisStage.id, StageSubmission.scope)
+            .outerjoin(
+                StageSubmission,
+                (StageSubmission.stage_id == ThesisStage.id)
+                & (StageSubmission.version_id == ThesisStage.submitted_version_id),
+            )
+            .where(
+                ThesisStage.thesis_id == document.thesis_id,
+                ThesisStage.status == StageStatus.IN_REVIEW,
+            )
         )
-        .limit(1)
-    )
-    if reviewing is not None:
+    ).all()
+    if not reviewing:
+        return
+    if content is None or any(scope != "chapter" for _, scope in reviewing):
         raise HTTPException(409, "Document is locked while a stage is in review")
+    if template_version_id != document.template_version_id:
+        raise HTTPException(409, "Document template is locked while a chapter is in review")
+    if not preserves_chapters(document.content, content, {stage_id for stage_id, _ in reviewing}):
+        raise HTTPException(409, "Document changes affect a chapter in review")

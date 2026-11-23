@@ -24,6 +24,8 @@ class DocumentSave(RevisionRequest):
 
     @model_validator(mode="after")
     def validate_schema_version(self) -> "DocumentSave":
+        if self.schema_version < 4 and self.content.chapter_stage_ids():
+            raise ValueError("Stage bindings require schema_version 4")
         if self.schema_version < 3 and self.content.requires_v3():
             raise ValueError("Semantic captions require schema_version 3")
         if self.schema_version == 1 and self.content.requires_v2():
