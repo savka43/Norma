@@ -1,0 +1,61 @@
+.snapshot {
+  display: grid;
+  color: #25394c;
+}
+.snapshot p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0;
+  padding: 0.5rem 0.65rem;
+}
+.snapshot .heading {
+  font: 400 1.25rem/1.35 var(--display);
+}
+.snapshot .quote {
+  border-left: 2px solid #b4c7d6;
+}
+.snapshot .caption {
+  font-size: 0.91rem;
+  color: var(--muted);
+}
+.snapshot .listitem {
+  padding-inline-start: 1.45rem;
+}
+.anchor {
+  background: #fff4e9;
+  scroll-margin-top: 1rem;
+}
+.excerpt {
+  padding: 0.6rem 0.8rem;
+  border-left: 2px solid #da9b7d;
+  margin: 0.55rem 0;
+  background: #fbf2ea;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.measures {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+  margin: 0.6rem 0;
+}
+.measures div {
+  background: var(--paper);
+  padding: 0.45rem 0.6rem;
+}
+.measures dt {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.measures dd {
+  margin: 0;
+  font-size: 1.12rem;
+  font-weight: 650;
+}
+.action {
+  margin-top: 1rem;
+}
