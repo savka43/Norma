@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import io
 import posixpath
-import warnings
 import zipfile
 import zlib
 from dataclasses import dataclass, field
@@ -14,9 +13,14 @@ from xml.etree.ElementTree import Element, ParseError
 
 from defusedxml.common import DefusedXmlException
 from defusedxml.ElementTree import iterparse
-from PIL import Image, UnidentifiedImageError
 from pydantic import JsonValue, ValidationError
 
+from app.api_v1.documents.images import (
+    MAX_IMAGE_PIXELS,
+    ImageLimitExceeded,
+    InvalidImage,
+    normalize_image,
+)
 from app.api_v1.documents.lexical import LexicalContent
 
 DOCX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -25,7 +29,6 @@ MAX_UNPACKED_BYTES = 50 * 1024 * 1024
 MAX_PART_BYTES = 8 * 1024 * 1024
 MAX_ENTRIES = 1000
 MAX_XML_NODES = 100_000
-MAX_IMAGE_PIXELS = 20_000_000
 W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 R = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
 A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
@@ -315,37 +318,16 @@ class Converter:
             asset = self.assets.get(path)
             if asset is None:
                 try:
-                    with warnings.catch_warnings():
-                        warnings.simplefilter("error", Image.DecompressionBombWarning)
-                        with Image.open(io.BytesIO(self.parts[path])) as image:
-                            if image.format not in ("PNG", "JPEG"):
-                                self.warn("unsupported_image")
-                                continue
-                            if image.width * image.height > MAX_IMAGE_PIXELS:
-                                raise InvalidDocx("Image pixel limit exceeded")
-                            image.load()
-                            output = io.BytesIO()
-                            has_alpha = "A" in image.getbands() or "transparency" in image.info
-                            image.convert("RGBA" if has_alpha else "RGB").save(output, format="PNG")
-                            binary = output.getvalue()
-                            self.asset_bytes += len(binary)
-                            if self.asset_bytes > MAX_UPLOAD_BYTES:
-                                raise InvalidDocx("Decoded image size limit exceeded")
-                            asset = ImportedAsset(
-                                uuid4(), binary, "image/png", image.width, image.height
-                            )
-                except (
-                    UnidentifiedImageError,
-                    OSError,
-                    SyntaxError,
-                    ValueError,
-                    Image.DecompressionBombWarning,
-                    Image.DecompressionBombError,
-                ) as exc:
-                    if isinstance(exc, InvalidDocx):
-                        raise
+                    image = normalize_image(self.parts[path], pixel_limit=MAX_IMAGE_PIXELS)
+                except ImageLimitExceeded as exc:
+                    raise InvalidDocx(str(exc)) from exc
+                except InvalidImage:
                     self.warn("unsupported_image")
                     continue
+                self.asset_bytes += len(image.data)
+                if self.asset_bytes > MAX_UPLOAD_BYTES:
+                    raise InvalidDocx("Decoded image size limit exceeded")
+                asset = ImportedAsset(uuid4(), image.data, "image/png", image.width, image.height)
                 self.assets[path] = asset
             alt = next(
                 (n.get("descr", "") for n in drawing.iter() if n.tag.endswith("}docPr")), ""

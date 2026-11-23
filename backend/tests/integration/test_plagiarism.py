@@ -146,6 +146,9 @@ async def test_failed_external_call_requires_new_user_request(
     assert len(provider.uploads) == 1 and provider.started == [42] and not provider.polled
     retry = await api_client.post(path, json=CONFIRM)
     assert retry.status_code == 202 and retry.json()["id"] != failed["id"]
+    assert datetime.fromisoformat(retry.json()["created_at"]) > datetime.fromisoformat(
+        failed["created_at"]
+    )
     history_response = await api_client.get(path)
     assert [item["status"] for item in history_response.json()["items"]] == ["queued", "failed"]
 

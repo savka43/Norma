@@ -36,6 +36,8 @@ frontend/src/features/document-editor/
 Backend принимает schema v1: paragraph/heading/quote/list/listitem/text/linebreak,
 и v2 с table/tablerow/tablecell и inline `norma-image {asset_id, alt_text, version: 1}`.
 У картинки нет произвольного src; содержимое читается защищённым API assets.
+Картинку для вставки редактор загружает отдельным `POST /documents/{id}/assets`
+и сохраняет полученный UUID в `norma-image` при автосохранении.
 При сохранении backend проверяет принадлежность UUID этому документу. Неизвестные
 узлы/inline CSS отклоняются. Фикстуры `@lexical/headless`/`@lexical/table` 0.53.0
 проверяют сериализацию, дополнительно проверен HTTP/JSONB round-trip.

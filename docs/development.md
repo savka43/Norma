@@ -304,6 +304,10 @@ curl 'http://localhost:8000/api/v1/documents/DOCUMENT_UUID/import?expected_revis
 - `GET /api/v1/documents/{document_id}/imports/{import_id}/source` — точный оригинал.
 - `GET /api/v1/documents/{document_id}/assets/{asset_id}` — обработанный PNG;
   UUID находится в `norma-image` содержимого. Читает также руководитель этой ВКР.
+- `POST /api/v1/documents/{document_id}/assets?expected_revision=N` сохраняет
+  PNG/JPEG из сырого тела запроса. Нужны `Content-Type`, `X-Edit-Lease` и CSRF.
+  Ответ `201` содержит UUID для следующего PUT с `norma-image`. Загрузка
+  изображения сама по себе не создаёт версию и не меняет ревизию.
 
 Лимит загрузки — 10 MiB (`413`), повреждённый/небезопасный ZIP/XML — `422`,
 другой Content-Type/Content-Encoding — `415`. Multipart не поддерживается.

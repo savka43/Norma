@@ -14,11 +14,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api_v1.documents.export.docx import DOCX_MEDIA_TYPE
 from app.core.config import Settings
 from app.core.models import DocumentEditLease
-from tests.document_helpers import parameters
+from tests.document_helpers import parameters, text_block
 from tests.formatting_helpers import formatting_content
 from tests.integration.actors import authenticate
 from tests.integration.test_documents import Workspace, acquire, save_payload, snapshot
 from tests.integration.test_documents import workspace as workspace
+from tests.integration.test_stage_review import stage_plan, submit
 
 pytestmark = pytest.mark.integration
 
@@ -194,7 +195,7 @@ async def test_formatting_invalid_inputs_expired_lease_and_failed_export_do_not_
     assert (await api_client.get(base)).json()["revision"] == 1
 
 
-async def test_export_real_imported_docx_includes_tables_images_and_survives_restore(
+async def test_imported_docx_round_trip_preserves_text_table_image_and_history(
     api_client: AsyncClient, workspace: Workspace
 ) -> None:
     base = f"/api/v1/documents/{workspace.document_id}"
@@ -214,15 +215,33 @@ async def test_export_real_imported_docx_includes_tables_images_and_survives_res
     assert doc.paragraphs[0].text == "Синтетическая ВКР"
     assert len(doc.tables) == 1 and doc.tables[0].cell(1, 1).text == "Ячейка 4"
     assert len(doc.inline_shapes) == 1
+    reimported = await api_client.post(
+        f"{base}/import?expected_revision=2&confirm_replace=true",
+        headers={**lease, "Content-Type": DOCX_MEDIA_TYPE},
+        content=exported.content,
+    )
+    assert reimported.status_code == 201, reimported.text
+    round_trip = reimported.json()["version"]
+    assert round_trip["id"] != result["version"]["id"]
+    round_trip_export = await api_client.post(
+        f"/api/v1/document-versions/{round_trip['id']}/exports", json={"format": "docx"}
+    )
+    assert round_trip_export.status_code == 200, round_trip_export.text
+    round_trip_doc = Document(BytesIO(round_trip_export.content))
+    assert [p.text for p in round_trip_doc.paragraphs] == [p.text for p in doc.paragraphs]
+    assert len(round_trip_doc.tables) == 1
+    assert round_trip_doc.tables[0].cell(1, 1).text == "Ячейка 4"
+    assert len(round_trip_doc.inline_shapes) == 1
     restored = await api_client.post(
         f"{base}/restore",
         headers=lease,
         json={
-            "expected_revision": 2,
+            "expected_revision": 3,
             "version_id": result["import_record"]["previous_version_id"],
         },
     )
     assert restored.status_code == 200
+    assert (await api_client.get(path.removesuffix("/exports"))).json() == result["version"]
     repeated = await api_client.post(path, json={"format": "docx"})
     assert (
         repeated.status_code == 200 and len(Document(BytesIO(repeated.content)).inline_shapes) == 1
@@ -247,13 +266,14 @@ async def test_pdf_http_errors_leave_document_and_version_unchanged(
     assert (await api_client.get(path)).json() == version
 
 
-async def test_real_pdf_http_export_keeps_imported_text_table_and_image(
+async def test_real_pdf_export_of_submitted_chapter_uses_pinned_multipage_document(
     api_client: AsyncClient,
     workspace: Workspace,
     integration_settings: Settings,
 ) -> None:
     if not shutil.which(integration_settings.pdf_converter):
         pytest.skip("Run real PDF HTTP test inside the API image with LibreOffice")
+    stage = (await stage_plan(api_client, workspace))[0]
     lease = await acquire(api_client, workspace)
     base = f"/api/v1/documents/{workspace.document_id}"
     source = (Path(__file__).parents[1] / "fixtures/synthetic-import.docx").read_bytes()
@@ -263,16 +283,48 @@ async def test_real_pdf_http_export_keeps_imported_text_table_and_image(
         content=source,
     )
     assert imported.status_code == 201
-    version = imported.json()["version"]
+    content = imported.json()["document"]["content"]
+    blocks = content["root"]["children"]
+    assert blocks[0]["tag"] == "h1"
+    blocks[0]["$"] = {"normaStageId": stage}
+    blocks.extend(
+        [
+            text_block("Следующая глава", tag="h1"),
+            *(text_block(f"Абзац {index} для многостраничной проверки.") for index in range(90)),
+            text_block("Последний сохранённый абзац"),
+        ]
+    )
+    payload = {**save_payload(workspace, 2), "content": content, "schema_version": 4}
+    saved = await api_client.put(base, headers=lease, json=payload)
+    assert saved.status_code == 200, saved.text
+    await submit(api_client, stage, lease, 2, 3)
+    submission = (await api_client.get(f"/api/v1/stages/{stage}/submissions")).json()["items"][0]
+    assert submission["scope"] == "chapter"
+    blocks[-1] = text_block("Последний изменённый абзац")
+    edited = await api_client.put(base, headers=lease, json={**payload, "expected_revision": 3})
+    assert edited.status_code == 200, edited.text
+
+    version_id = submission["version_id"]
+    authenticate(api_client, workspace.actors, workspace.actors.owner)
     response = await api_client.post(
-        f"/api/v1/document-versions/{version['id']}/exports", json={"format": "pdf"}
+        f"/api/v1/document-versions/{version_id}/exports", json={"format": "pdf"}
     )
     assert response.status_code == 200, response.text
     assert response.headers["content-type"] == "application/pdf"
-    assert response.headers["x-document-version"] == version["id"]
+    assert response.headers["x-document-version"] == version_id
+    assert response.headers["x-template-version"] == workspace.template_version_id
     assert "font_substitution" in response.headers["x-export-warnings"]
     reader = PdfReader(BytesIO(response.content))
+    assert len(reader.pages) >= 2
     extracted = "\n".join(page.extract_text() for page in reader.pages)
     assert "Синтетическая ВКР" in extracted
     assert "Ячейка 4" in extracted and "Конец документа" in extracted
-    assert sum(len(page.images) for page in reader.pages) == 1
+    assert "Последний сохранённый абзац" in extracted
+    assert "Последний изменённый абзац" not in extracted
+    images = {
+        image.indirect_reference.idnum
+        for page in reader.pages
+        for image in page.images
+        if image.indirect_reference is not None
+    }
+    assert len(reader.pages[0].images) == 1 and len(images) == 1

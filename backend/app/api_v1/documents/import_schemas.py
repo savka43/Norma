@@ -42,3 +42,16 @@ class ImportPage(BaseModel):
     items: list[ImportSummary]
     limit: int
     offset: int
+
+
+class AssetUploadParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_revision: int = Field(ge=1, le=2**31 - 2)
+
+
+class AssetResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    width: int
+    height: int
+    media_type: str

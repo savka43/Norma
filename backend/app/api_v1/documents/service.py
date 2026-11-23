@@ -8,17 +8,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api_v1.documents import crud
 from app.api_v1.documents.chapters import preserves_chapters
+from app.api_v1.documents.images import NormalizedImage
 from app.api_v1.documents.lexical import empty_content
 from app.api_v1.documents.schemas import DocumentSave, RestoreRequest, VersionCreate
 from app.api_v1.formatting import crud as formatting_crud
 from app.core.models import (
     Document,
+    DocumentAsset,
     DocumentEditLease,
     DocumentVersion,
     StageStatus,
     StageSubmission,
     Thesis,
     ThesisStage,
+    User,
 )
 
 
@@ -130,6 +133,30 @@ async def save_document(
     document.updated_at = await crud.database_now(session)
     await session.commit()
     return document
+
+
+async def create_image_asset(
+    session: AsyncSession,
+    document_id: UUID,
+    student: User,
+    lease_id: UUID,
+    expected_revision: int,
+    image: NormalizedImage,
+) -> DocumentAsset:
+    document = await crud.find_document(session, document_id, student, lock=True)
+    if document is None:
+        raise HTTPException(404, "Document not found")
+    await require_revision_and_lease(session, document, student.id, lease_id, expected_revision)
+    asset = DocumentAsset(
+        document_id=document.id,
+        media_type="image/png",
+        data=image.data,
+        width=image.width,
+        height=image.height,
+    )
+    session.add(asset)
+    await session.commit()
+    return asset
 
 
 async def add_snapshot(

@@ -204,7 +204,8 @@ UPDATE обеих таблиц версий также отвергается т
 | `POST /documents/{document_id}/import?expected_revision=N&confirm_replace=true` | Бинарное тело DOCX → `201 {document, version, import_record}` |
 | `GET /documents/{document_id}/imports` | `{items: ImportSummary[], limit, offset}`; исходные байты не входят в список |
 | `GET /documents/{document_id}/imports/{import_id}/source` | Исходные байты DOCX как attachment с UUID-именем |
-| `GET /documents/{document_id}/assets/{asset_id}` | Обработанный PNG по UUID из текста, доступен также после restore |
+| `GET /documents/{document_id}/assets/{asset_id}` | Обработанный PNG по UUID, доступен также после restore |
+| `POST /documents/{document_id}/assets?expected_revision=N` | Студент своей ВКР, `X-Edit-Lease` и тело PNG/JPEG → `201 {id, width, height, media_type}` |
 
 Content-Type загрузки:
 `application/vnd.openxmlformats-officedocument.wordprocessingml.document`.
@@ -232,6 +233,13 @@ revision на 1 и создаёт контрольную версию импор
 Поддержаны текст/заголовки/базовое выделение/вложенные списки, типовые таблицы,
 PNG/JPEG; рисунки перекодируются в PNG без исходных метаданных. `norma-image` —
 `{type: "norma-image", version: 1, asset_id: UUID, alt_text}` внутри текстового блока.
+Прямая загрузка использует `Content-Type: image/png` или `image/jpeg`.
+Ввод и результат ограничены 10 МиБ, изображение — 20 млн пикселей. Неверный
+тип — `415`, повреждённое изображение или несоответствие типу — `422`,
+превышение лимита — `413`, конфликт аренды или ревизии — `409`. Успех возвращает
+UUID нормализованного PNG. Текст, ревизия и история импорта не изменяются при
+загрузке. Редактор вставляет `norma-image` при обычном PUT документа. Для этого
+PUT действуют правила активных проверок глав. [ADR-016](../decisions/ADR-016-editor-images.md).
 Внешних src/HTML нет; сохранение неизвестного/чужого asset_id — `422`.
 `table/tablerow/tablecell` совместимы с проверенным подмножеством @lexical/table
 0.53.0; таблица до 100 столбцов/1000 строк, colSpan поддержан, rowSpan=1,

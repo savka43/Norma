@@ -48,7 +48,14 @@ async def enqueue(
     )
     if await crud.active_check_id(session, version.id) is not None:
         raise HTTPException(409, "This version already has an active check")
-    check = PlagiarismCheck(version_id=version.id, requested_by_id=student.id)
+    now = await database_now(session)
+    check = PlagiarismCheck(
+        version_id=version.id,
+        requested_by_id=student.id,
+        created_at=now,
+        updated_at=now,
+        next_run_at=now,
+    )
     session.add(check)
     await session.commit()
     return check

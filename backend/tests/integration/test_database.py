@@ -61,7 +61,7 @@ def test_migration_round_trip(integration_settings: Settings) -> None:
 
     run_alembic(integration_settings, "upgrade", "head")
     assert asyncio.run(database_state()) == (
-        "0011_stage_chapters",
+        "0012_editor_image_upload",
         {
             "users",
             "auth_sessions",

@@ -42,7 +42,9 @@ class DocumentAsset(Base):
     document_id: Mapped[UUID] = mapped_column(
         ForeignKey("documents.id", ondelete="RESTRICT"), index=True
     )
-    import_id: Mapped[UUID] = mapped_column(ForeignKey("document_imports.id", ondelete="RESTRICT"))
+    import_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("document_imports.id", ondelete="RESTRICT")
+    )
     data: Mapped[bytes] = mapped_column(LargeBinary, deferred=True)
     media_type: Mapped[str] = mapped_column(String(32))
     width: Mapped[int]

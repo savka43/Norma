@@ -1,3 +1,4 @@
+from collections.abc import Collection
 from typing import Annotated
 from uuid import UUID
 
@@ -13,7 +14,15 @@ from app.api_v1.documents.docx_import import (
     InvalidDocx,
     convert_docx,
 )
+from app.api_v1.documents.images import (
+    IMAGE_FORMATS,
+    ImageLimitExceeded,
+    InvalidImage,
+    normalize_image,
+)
 from app.api_v1.documents.import_schemas import (
+    AssetResponse,
+    AssetUploadParams,
     ImportPage,
     ImportParams,
     ImportResponse,
@@ -26,9 +35,10 @@ from app.api_v1.documents.views import PageParamsDep, no_store
 router = APIRouter(tags=["documents"], dependencies=[Depends(no_store)])
 
 
-async def read_docx_body(request: Request) -> bytes:
-    if request.headers.get("content-type", "").split(";", 1)[0].strip().lower() != DOCX_MEDIA_TYPE:
-        raise HTTPException(415, "Use the DOCX content type and send the file as the request body")
+async def read_upload_body(request: Request, media_types: Collection[str]) -> tuple[bytes, str]:
+    media_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if media_type not in media_types:
+        raise HTTPException(415, "Use a supported Content-Type and send the raw file as the body")
     if request.headers.get("content-encoding", "identity").lower() != "identity":
         raise HTTPException(415, "Encoded request bodies are not supported")
     length = request.headers.get("content-length")
@@ -40,13 +50,13 @@ async def read_docx_body(request: Request) -> bytes:
         if size < 0:
             raise HTTPException(400, "Invalid Content-Length")
         if size > MAX_UPLOAD_BYTES:
-            raise HTTPException(413, "DOCX upload limit is 10 MiB")
+            raise HTTPException(413, "Upload limit is 10 MiB")
     data = bytearray()
     async for chunk in request.stream():
         if len(data) + len(chunk) > MAX_UPLOAD_BYTES:
-            raise HTTPException(413, "DOCX upload limit is 10 MiB")
+            raise HTTPException(413, "Upload limit is 10 MiB")
         data.extend(chunk)
-    return bytes(data)
+    return bytes(data), media_type
 
 
 @router.post(
@@ -72,7 +82,7 @@ async def import_document(
     await service.require_revision_and_lease(
         session, document, student.id, lease_id, params.expected_revision
     )
-    source = await read_docx_body(request)
+    source, _ = await read_upload_body(request, (DOCX_MEDIA_TYPE,))
     try:
         result = await run_in_threadpool(convert_docx, source)
     except InvalidDocx as exc:
@@ -147,3 +157,43 @@ async def get_asset(
             "Content-Security-Policy": "default-src 'none'; sandbox",
         },
     )
+
+
+@router.post(
+    "/documents/{document_id}/assets",
+    status_code=201,
+    responses={400: {}, 403: {}, 404: {}, 409: {}, 413: {}, 415: {}},
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                media_type: {"schema": {"type": "string", "format": "binary"}}
+                for media_type in IMAGE_FORMATS
+            },
+        }
+    },
+)
+async def upload_asset(
+    request: Request,
+    params: Annotated[AssetUploadParams, Query()],
+    document: AccessibleDocumentDep,
+    student: StudentDep,
+    lease_id: LeaseIdDep,
+    session: SessionDep,
+) -> AssetResponse:
+    await service.require_revision_and_lease(
+        session, document, student.id, lease_id, params.expected_revision
+    )
+    source, media_type = await read_upload_body(request, IMAGE_FORMATS)
+    try:
+        image = await run_in_threadpool(normalize_image, source, media_type=media_type)
+    except ImageLimitExceeded as exc:
+        raise HTTPException(413, str(exc)) from exc
+    except InvalidImage as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if len(image.data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, "Normalized image exceeds 10 MiB")
+    asset = await service.create_image_asset(
+        session, document.id, student, lease_id, params.expected_revision, image
+    )
+    return AssetResponse.model_validate(asset)
