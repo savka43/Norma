@@ -1,6 +1,6 @@
 .snapshot {
   display: grid;
-  color: #25394c;
+  color: var(--ink);
 }
 .snapshot p {
   white-space: pre-wrap;
@@ -12,7 +12,7 @@
   font: 400 1.25rem/1.35 var(--display);
 }
 .snapshot .quote {
-  border-left: 2px solid #b4c7d6;
+  border-left: 2px solid var(--line-strong);
 }
 .snapshot .caption {
   font-size: 0.91rem;
@@ -22,14 +22,19 @@
   padding-inline-start: 1.45rem;
 }
 .anchor {
-  background: #fff4e9;
+  background: var(--blue-tint);
   scroll-margin-top: 1rem;
+}
+
+.quoteMark {
+  background: var(--color-comment);
+  color: var(--blue-hover);
 }
 .excerpt {
   padding: 0.6rem 0.8rem;
-  border-left: 2px solid #da9b7d;
+  border-left: 2px solid var(--blue);
   margin: 0.55rem 0;
-  background: #fbf2ea;
+  background: var(--blue-tint);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }

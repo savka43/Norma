@@ -1,19 +1,17 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, Navigate } from 'react-router-dom'
 import { useApi } from '../../shared/api/queries'
-import type { Page, Thesis, User } from '../../shared/api/types'
-import { date, ErrorNotice, Notice, Pager, Panel } from '../../shared/ui/Ui'
+import type { Page, Thesis } from '../../shared/api/types'
+import { Button, date, ErrorNotice, Notice, Pager } from '../../shared/ui/Ui'
 import w from '../../shared/ui/Workspace.module.css'
+import styles from './ThesisPage.module.css'
 
 export function Progress({ thesis }: { thesis: Thesis }) {
+  if (thesis.progress_percent === null) return <small>Этапов пока нет</small>
   return (
     <div className={w.progress}>
       <span>
-        <strong>
-          {thesis.progress_percent === null
-            ? '—'
-            : `${Math.round(thesis.progress_percent)}%`}
-        </strong>{' '}
+        <strong>{Math.round(thesis.progress_percent)}%</strong>{' '}
         <small>
           {thesis.completed_stages} из {thesis.total_stages} этапов
         </small>
@@ -21,25 +19,60 @@ export function Progress({ thesis }: { thesis: Thesis }) {
       <progress
         aria-label="Прогресс ВКР"
         max={100}
-        value={thesis.progress_percent ?? 0}
+        value={thesis.progress_percent}
       />
     </div>
   )
 }
 
-export function ThesisList({ role }: { role: User['role'] }) {
+export function StudentHome() {
+  const thesis = useApi<Page<Thesis>>('/theses?limit=1')
+  const assigned = thesis.data?.items[0]
+  if (assigned) return <Navigate to={`/works/${assigned.id}`} replace />
+
+  return (
+    <div className={w.page}>
+      {!thesis.isSuccess && <h1>Моя ВКР</h1>}
+      {thesis.isPending && <Notice>Открываем ВКР…</Notice>}
+      {thesis.error && (
+        <div className={w.stack}>
+          <ErrorNotice error={thesis.error} />
+          <div>
+            <Button onClick={() => void thesis.refetch()}>Повторить</Button>
+          </div>
+        </div>
+      )}
+      {thesis.isSuccess && (
+        <section className={styles.empty} aria-labelledby="assignment-heading">
+          <h1 id="assignment-heading">
+            Руководитель ещё не назначил вам тему ВКР.
+          </h1>
+          <p>
+            После назначения здесь появятся этапы, сроки и рабочий документ.
+          </p>
+          <Button
+            variant="secondary"
+            disabled={thesis.isFetching}
+            onClick={() => void thesis.refetch()}
+          >
+            Проверить назначение
+          </Button>
+        </section>
+      )}
+    </div>
+  )
+}
+
+export function ThesisList() {
   const [offset, setOffset] = useState(0)
   const limit = 25
   const list = useApi<Page<Thesis>>(`/theses?limit=${limit}&offset=${offset}`)
   return (
     <div className={w.page}>
       <header className={w.heading}>
-        <div>
-          <p>Кабинет {role === 'student' ? 'студента' : 'руководителя'}</p>
-          <h1>{role === 'student' ? 'Моя ВКР' : 'Выпускные работы'}</h1>
-        </div>
+        <h1>Выпускные работы</h1>
       </header>
-      <Panel title={role === 'student' ? 'Работа и этапы' : 'Работы студентов'}>
+      <section aria-label="Работы студентов">
         <ErrorNotice error={list.error} />
         {list.isPending && <Notice>Загружаем работы…</Notice>}
         {list.data && (
@@ -48,9 +81,7 @@ export function ThesisList({ role }: { role: User['role'] }) {
               <p>
                 {offset
                   ? 'На этой странице нет работ.'
-                  : role === 'student'
-                    ? 'Руководитель ещё не назначил вам тему ВКР.'
-                    : 'Создайте ВКР для студента в разделе «Группы».'}
+                  : 'Создайте ВКР для студента в разделе «Группы».'}
               </p>
             )}
             <ul className={w.list}>
@@ -75,7 +106,7 @@ export function ThesisList({ role }: { role: User['role'] }) {
             />
           </>
         )}
-      </Panel>
+      </section>
     </div>
   )
 }

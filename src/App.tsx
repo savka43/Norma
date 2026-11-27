@@ -9,15 +9,19 @@ import {
   Routes,
   useNavigate,
 } from 'react-router-dom'
+import { StudentHeader } from './features/profile/StudentHeader'
+import { ProfilePage } from './features/profile/ProfilePage'
+import { StudentMaterials } from './features/formatting/StudentMaterials'
 import { AuthPage } from './features/auth/AuthPage'
 import { GroupPage, Groups, Templates } from './features/groups/Groups'
 import { VersionPage } from './features/review/VersionPage'
-import { ThesisList } from './features/theses/ThesisList'
+import { StudentHome, ThesisList } from './features/theses/ThesisList'
 import { ThesisPage } from './features/theses/ThesisPage'
 import { ApiError, send } from './shared/api/client'
 import { useApi } from './shared/api/queries'
 import type { User } from './shared/api/types'
 import { Button, ErrorNotice, Notice } from './shared/ui/Ui'
+import { Wordmark } from './shared/ui/Wordmark'
 import styles from './App.module.css'
 
 const DocumentEditor = lazy(
@@ -43,47 +47,50 @@ function Shell({ user }: { user: User }) {
       <a className={styles.skip} href="#content">
         К содержанию
       </a>
-      <aside className={styles.rail}>
-        <Link className={styles.brand} to="/">
-          <span aria-hidden="true" className={styles.mark}>
-            <span />
-            <span />
-            <span />
-          </span>
-          Норма
-        </Link>
-        <nav aria-label="Кабинет">
-          {!student && (
+      {student ? (
+        <StudentHeader
+          user={user}
+          logout={() => logout.mutate()}
+          pending={logout.isPending}
+        />
+      ) : (
+        <header className={styles.header}>
+          <div className={styles.headerInner}>
+            <Link className={styles.brand} to="/">
+              <Wordmark />
+            </Link>
+            <div className={styles.identity}>
+              <div>
+                <p>{user.full_name}</p>
+                <small>Научный руководитель</small>
+              </div>
+              <Button
+                variant="secondary"
+                disabled={logout.isPending}
+                onClick={() => logout.mutate()}
+              >
+                Выйти
+              </Button>
+            </div>
+          </div>
+          <nav className={styles.nav} aria-label="Кабинет руководителя">
             <NavLink className={styles.navItem} to="/groups">
               Группы
             </NavLink>
-          )}
-          <NavLink className={styles.navItem} to="/works">
-            {student ? 'Моя ВКР' : 'Выпускные работы'}
-          </NavLink>
-          {!student && (
+            <NavLink className={styles.navItem} to="/works">
+              Выпускные работы
+            </NavLink>
             <NavLink className={styles.navItem} to="/templates">
               Шаблоны
             </NavLink>
-          )}
-        </nav>
-        <div className={styles.identity}>
-          <div>
-            <p>{user.full_name}</p>
-            <small>
-              {student ? user.academic_group : 'Научный руководитель'}
-            </small>
-          </div>
-          <Button
-            variant="secondary"
-            disabled={logout.isPending}
-            onClick={() => logout.mutate()}
-          >
-            Выйти
-          </Button>
+          </nav>
+        </header>
+      )}
+      {logout.error && (
+        <div className={styles.logoutError}>
           <ErrorNotice error={logout.error} />
         </div>
-      </aside>
+      )}
       <main id="content" tabIndex={-1} className={styles.main}>
         <Outlet />
       </main>
@@ -134,20 +141,24 @@ export default function App() {
             <Route path="templates" element={<Templates />} />
           </>
         )}
-        <Route path="works" element={<ThesisList role={user.role} />} />
+        <Route
+          path="works"
+          element={user.role === 'student' ? <StudentHome /> : <ThesisList />}
+        />
         <Route
           path="works/:thesisId"
           element={<ThesisPage role={user.role} />}
         />
         {user.role === 'student' && (
-          <Route
-            path="works/:thesisId/edit"
-            element={
-              <Suspense fallback={<Notice>Открываем редактор…</Notice>}>
-                <DocumentEditor userId={user.id} />
-              </Suspense>
-            }
-          />
+          <>
+            <Route path="profile" element={<ProfilePage user={user} />} />
+            <Route path="profile/:tab" element={<ProfilePage user={user} />} />
+            <Route path="materials" element={<StudentMaterials />} />
+            <Route
+              path="works/:thesisId/reviews"
+              element={<ThesisPage role="student" reviews />}
+            />
+          </>
         )}
         <Route
           path="works/:thesisId/versions/:versionId"
@@ -155,6 +166,18 @@ export default function App() {
         />
         <Route path="*" element={<Navigate to={home} replace />} />
       </Route>
+      {user.role === 'student' && (
+        <Route
+          path="works/:thesisId/edit"
+          element={
+            <main className={styles.main}>
+              <Suspense fallback={<Notice>Открываем редактор…</Notice>}>
+                <DocumentEditor userId={user.id} />
+              </Suspense>
+            </main>
+          }
+        />
+      )}
     </Routes>
   )
 }

@@ -32,9 +32,9 @@ def synthetic_docx(target: Path, final_text: str) -> None:
 def login(page: Page, base: str, email: str, password: str) -> None:
     page.goto(f"{base}/login")
     page.get_by_label("Электронная почта").fill(email)
-    page.get_by_label("Пароль").fill(password)
+    page.get_by_label("Пароль", exact=True).fill(password)
     page.get_by_role("button", name="Войти", exact=True).click()
-    expect(page.get_by_role("button", name="Выйти")).to_be_visible()
+    expect(page.get_by_role("banner").get_by_role("navigation")).to_be_visible()
 
 
 def upload(page: Page, source: Path) -> None:
@@ -70,7 +70,7 @@ def check_editor(page: Page, base: str, directory: Path) -> None:
             response.url == f"{path}/edit-lease" and response.request.method == "POST"
         )
     ) as first_lease:
-        page.get_by_role("link", name="Открыть редактор").click()
+        page.get_by_role("link", name="Редактор", exact=True).click()
     lease_id = first_lease.value.json()["lease_id"]
     root = page.get_by_role("textbox", name="Текст ВКР")
     position = page.get_by_test_id("page-position")
@@ -235,7 +235,7 @@ def check_editor(page: Page, base: str, directory: Path) -> None:
         )
     ):
         page.get_by_role("link", name="К работе").click()
-    expect(page.get_by_role("link", name="Открыть редактор")).to_be_visible()
+    expect(page.get_by_role("link", name="Редактор", exact=True)).to_be_visible()
     assert not errors, errors
 
 
@@ -257,16 +257,50 @@ def accept(browser: Browser, args: argparse.Namespace, directory: Path) -> None:
     user.wait_for_load_state("networkidle")
     user.screenshot(path=directory / "login.png", full_page=True)
     user.get_by_role("link", name="Зарегистрироваться студенту").click()
-    user.get_by_label("Имя и фамилия").fill("Студент Демонстрационный")
+    user.get_by_label("Фамилия", exact=True).fill("Демонстрационный")
+    user.get_by_label("Имя", exact=True).fill("Студент")
     user.get_by_label("Учебная группа").fill("ТЕСТ-26")
     user.get_by_label("Электронная почта").fill(student_email)
-    user.get_by_label("Пароль").fill(password)
+    user.locator('input[autocomplete="new-password"]').first.fill(password)
+    user.get_by_label("Повторите пароль").fill("Несовпадающий пароль")
+    expect(user.get_by_text("Пароли не совпадают.")).to_be_visible()
+    user.get_by_label("Показать пароль").check()
+    expect(user.locator('input[autocomplete="new-password"]').first).to_have_attribute(
+        "type", "text"
+    )
+    user.get_by_label("Повторите пароль").fill(password)
+    user.get_by_label("Показать пароль").uncheck()
     user.get_by_role("button", name="Создать аккаунт").click()
     expect(user.get_by_text("Аккаунт создан", exact=False)).to_be_visible()
     login(user, args.base, student_email, password)
     expect(
         user.get_by_text("Руководитель ещё не назначил вам тему ВКР.")
     ).to_be_visible()
+    expect(user).to_have_url(f"{args.base}/works")
+    expect(user.get_by_role("navigation", name="Кабинет студента")).to_be_visible()
+
+    account = user.get_by_label("Меню профиля")
+    account.focus()
+    account.press("Enter")
+    expect(user.get_by_role("link", name="Мой профиль")).to_be_visible()
+    account.press("Escape")
+    expect(account).to_be_focused()
+    account.click()
+    user.get_by_role("link", name="Мой профиль").click()
+    expect(
+        user.get_by_role("main").get_by_text(student_email, exact=True)
+    ).to_be_visible()
+    expect(user.get_by_role("main").get_by_text("ТЕСТ-26", exact=True)).to_be_visible()
+    expect(
+        user.get_by_role("main").get_by_text("Демонстрационный Студент")
+    ).to_be_visible()
+    user.screenshot(path=directory / "profile.png")
+    tabs = user.get_by_role("navigation", name="Разделы профиля")
+    tabs.get_by_role("link", name="Безопасность").click()
+    expect(user.get_by_role("heading", name="Пароль")).to_be_visible()
+    tabs.get_by_role("link", name="Уведомления").click()
+    expect(user.get_by_role("heading", name="Уведомления по почте")).to_be_visible()
+    user.get_by_role("link", name="Моя ВКР").click()
 
     supervisor_ctx = browser.new_context()
     supervisor = supervisor_ctx.new_page()
@@ -302,8 +336,8 @@ def accept(browser: Browser, args: argparse.Namespace, directory: Path) -> None:
         supervisor.get_by_text("Шаблон доступен студентам вашей группы.")
     ).to_be_visible()
 
-    user.reload()
-    user.get_by_role("link", name=thesis).click()
+    user.get_by_role("button", name="Проверить назначение").click()
+    expect(user).to_have_url(work_url)
     user.get_by_label("Шаблон оформления").select_option(label="ГОСТ 7.32-2017")
     user.get_by_role("button", name="Создать документ").click()
     upload(user, first_doc)
@@ -311,7 +345,9 @@ def accept(browser: Browser, args: argparse.Namespace, directory: Path) -> None:
         check_editor(user, args.base, directory)
         upload(user, first_doc)
     user.get_by_role("button", name="Отправить на проверку").click()
-    expect(user.get_by_text("На проверке", exact=True)).to_be_visible()
+    expect(
+        user.locator("li[data-status]").get_by_text("На проверке", exact=True)
+    ).to_be_visible()
     user.screenshot(path=directory / "student.png", full_page=True)
 
     supervisor.goto(work_url)
@@ -329,7 +365,9 @@ def accept(browser: Browser, args: argparse.Namespace, directory: Path) -> None:
     assert supervisor.evaluate("document.documentElement.scrollWidth === innerWidth")
     supervisor.screenshot(path=directory / "review.png", full_page=True)
     supervisor.get_by_role("button", name="Вернуть на доработку").click()
-    expect(supervisor.get_by_text("Нужны правки", exact=True)).to_be_visible()
+    expect(
+        supervisor.locator("li[data-status]").get_by_text("Нужны правки", exact=True)
+    ).to_be_visible()
 
     user.reload()
     user.get_by_role("link", name="Открыть отправленную версию").click()
@@ -342,7 +380,9 @@ def accept(browser: Browser, args: argparse.Namespace, directory: Path) -> None:
     user.get_by_role("link", name=thesis).click()
     upload(user, second_doc)
     user.get_by_role("button", name="Отправить на проверку").click()
-    expect(user.get_by_text("На проверке", exact=True)).to_be_visible()
+    expect(
+        user.locator("li[data-status]").get_by_text("На проверке", exact=True)
+    ).to_be_visible()
     user.get_by_role("link", name="Открыть отправленную версию").click()
     final_url = user.url
     expect(user.get_by_text("Исправление: измерения", exact=False)).to_be_visible()
@@ -428,6 +468,7 @@ def accept(browser: Browser, args: argparse.Namespace, directory: Path) -> None:
     expect(user.get_by_role("heading", name=thesis)).to_be_visible()
     assert user.evaluate("document.documentElement.scrollWidth === innerWidth")
     user.screenshot(path=directory / "student-mobile.png", full_page=True)
+    user.get_by_label("Меню профиля").click()
     user.get_by_role("button", name="Выйти").click()
     expect(user.get_by_role("heading", name="Вход в кабинет")).to_be_visible()
     user.goto(work_url)

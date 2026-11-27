@@ -1,22 +1,41 @@
+@import '@fontsource/ibm-plex-sans/400.css';
+@import '@fontsource/ibm-plex-sans/500.css';
+@import './tokens.css';
+
 :root {
-  font-family: system-ui, sans-serif;
-  line-height: 1.5;
-  color: #1b3046;
-  background: #f0f3f6;
+  font-family: var(--font-ui);
   font-synthesis: none;
   color-scheme: light;
-  --ink: #1b3046;
-  --muted: #516477;
-  --accent: #a73f27;
-  --line: #d6dee6;
-  --paper: #f0f3f6;
-  --display: Georgia, 'Times New Roman', serif;
+  color: var(--color-text);
+  background: var(--color-bg);
+  --ink: var(--color-text);
+  --muted: var(--color-muted);
+  --green-deep: var(--green-900);
+  --green: var(--color-accent);
+  --green-hover: var(--green-900);
+  --mint: var(--green-50);
+  --blue: var(--color-primary);
+  --blue-hover: var(--blue-800);
+  --blue-tint: var(--blue-50);
+  --focus: var(--color-focus);
+  --paper: var(--color-bg);
+  --surface: var(--color-surface);
+  --line: var(--color-border);
+  --line-strong: var(--color-control-border);
+  --control-line: var(--color-control-border);
+  --danger: var(--color-error);
+  --danger-tint: var(--color-diff-old);
+  --display: var(--font-ui);
+  --gutter: clamp(16px, 3vw, var(--page-padding));
+  --content-width: calc(var(--content-max) + 2 * var(--gutter));
 }
 * {
   box-sizing: border-box;
 }
 body {
   margin: 0;
+  font-size: var(--text-base);
+  line-height: var(--leading-base);
 }
 h1,
 h2,
@@ -30,14 +49,29 @@ textarea,
 select {
   font: inherit;
 }
+:where(
+  a[href],
+  button,
+  summary,
+  select,
+  label[for],
+  label:has(input[type='checkbox']),
+  input[type='checkbox'],
+  input[type='radio']
+) {
+  cursor: pointer;
+}
+:disabled {
+  cursor: not-allowed;
+}
 input:not([type='checkbox']),
 textarea,
 select {
-  padding: 0.58rem 0.65rem;
-  min-height: 2.7rem;
-  border: 1px solid #aebdcb;
-  border-radius: 5px;
-  background: white;
+  padding: 7px 12px;
+  min-height: var(--control-md);
+  border: 1px solid var(--control-line);
+  border-radius: var(--radius);
+  background: var(--surface);
   color: var(--ink);
 }
 textarea {
@@ -45,24 +79,44 @@ textarea {
   resize: vertical;
 }
 input[type='checkbox'] {
-  accent-color: var(--ink);
+  accent-color: var(--green);
 }
 a {
-  color: #255882;
-  text-underline-offset: 0.19em;
+  color: var(--blue);
+  text-underline-offset: 0.2em;
 }
 a:hover {
-  color: var(--accent);
+  color: var(--blue-hover);
 }
 :focus-visible {
-  outline: 2px solid #a73f27;
+  outline: 2px solid var(--focus);
   outline-offset: 3px;
 }
 progress {
-  accent-color: #326781;
+  accent-color: var(--green);
   width: 100%;
   height: 0.65rem;
 }
 small {
   font-size: 0.835em;
+}
+
+h1,
+h2,
+h3,
+strong,
+b {
+  font-weight: var(--font-medium);
+}
+h1 {
+  font-size: var(--text-page);
+  line-height: var(--leading-page);
+}
+h2 {
+  font-size: var(--text-section);
+  line-height: var(--leading-section);
+}
+h3 {
+  font-size: var(--text-component);
+  line-height: var(--leading-section);
 }

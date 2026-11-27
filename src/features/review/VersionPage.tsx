@@ -1,7 +1,13 @@
 import { useForm } from '@tanstack/react-form'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useMemo, useState } from 'react'
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  Link,
+  useLocation,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from 'react-router-dom'
 import { download, send } from '../../shared/api/client'
 import { invalidatePaths, useApi } from '../../shared/api/queries'
 import type {
@@ -118,6 +124,13 @@ function Snapshot({
   const client = useQueryClient()
   const navigate = useNavigate()
   const blocks = useMemo(() => textBlocks(version.content), [version.content])
+  const text = useRef<HTMLDivElement>(null)
+  const { hash } = useLocation()
+  useEffect(() => {
+    if (!hash.startsWith('#block-')) return
+    const block = window.document.getElementById(hash.slice(1))
+    if (block && text.current?.contains(block)) block.focus()
+  }, [hash])
   const [selected, setSelected] = useState<string | null>(null)
   const exported = useMutation({
     mutationFn: (format: 'pdf' | 'docx') =>
@@ -190,7 +203,7 @@ function Snapshot({
             </details>
           )}
           {!blocks.length && <p>В версии нет текста.</p>}
-          <div className={styles.snapshot}>
+          <div className={styles.snapshot} ref={text}>
             {blocks.map((block) => (
               <p
                 key={block.id}

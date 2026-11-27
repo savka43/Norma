@@ -23,9 +23,13 @@ import {
   Panel,
 } from '../../shared/ui/Ui'
 import w from '../../shared/ui/Workspace.module.css'
-import { DocumentPanel } from './DocumentPanel'
+import { DocumentPanel, VersionList } from './DocumentPanel'
 import { getDocument, withLease } from './documents'
+import { ImportHistory } from './ImportHistory'
+import { StudentOverview } from './StudentOverview'
+import dashboard from './StudentOverview.module.css'
 import { Progress } from './ThesisList'
+import styles from './ThesisPage.module.css'
 
 const statuses = {
   in_progress: ['В работе', 'neutral'],
@@ -111,51 +115,57 @@ function StageForm({
         void form.handleSubmit()
       }}
     >
-      <form.Field name="name">
-        {(field) => (
-          <Field
-            label="Название этапа"
-            required
-            maxLength={255}
-            value={field.state.value}
-            onChange={(event) => field.handleChange(event.target.value)}
-          />
+      <form.Subscribe selector={(state) => state.isSubmitting}>
+        {(submitting) => (
+          <fieldset className={styles.stageFields} disabled={submitting}>
+            <form.Field name="name">
+              {(field) => (
+                <Field
+                  label="Название этапа"
+                  required
+                  maxLength={255}
+                  value={field.state.value}
+                  onChange={(event) => field.handleChange(event.target.value)}
+                />
+              )}
+            </form.Field>
+            <div className={w.pair}>
+              <form.Field name="due_date">
+                {(field) => (
+                  <Field
+                    label="Срок этапа"
+                    type="date"
+                    required
+                    min={thesis.start_date}
+                    max={thesis.due_date}
+                    value={field.state.value}
+                    onChange={(event) => field.handleChange(event.target.value)}
+                  />
+                )}
+              </form.Field>
+              <form.Field name="position">
+                {(field) => (
+                  <Field
+                    label="Порядок"
+                    type="number"
+                    min={1}
+                    max={max}
+                    required
+                    value={field.state.value || ''}
+                    onChange={(event) =>
+                      field.handleChange(Number(event.target.value))
+                    }
+                  />
+                )}
+              </form.Field>
+            </div>
+            <ErrorNotice error={mutation.error} />
+            <Button type="submit" disabled={mutation.isPending}>
+              {stage ? 'Сохранить этап' : 'Добавить этап'}
+            </Button>
+          </fieldset>
         )}
-      </form.Field>
-      <div className={w.pair}>
-        <form.Field name="due_date">
-          {(field) => (
-            <Field
-              label="Срок этапа"
-              type="date"
-              required
-              min={thesis.start_date}
-              max={thesis.due_date}
-              value={field.state.value}
-              onChange={(event) => field.handleChange(event.target.value)}
-            />
-          )}
-        </form.Field>
-        <form.Field name="position">
-          {(field) => (
-            <Field
-              label="Порядок"
-              type="number"
-              min={1}
-              max={max}
-              required
-              value={field.state.value || ''}
-              onChange={(event) =>
-                field.handleChange(Number(event.target.value))
-              }
-            />
-          )}
-        </form.Field>
-      </div>
-      <ErrorNotice error={mutation.error} />
-      <Button type="submit" disabled={mutation.isPending}>
-        {stage ? 'Сохранить этап' : 'Добавить этап'}
-      </Button>
+      </form.Subscribe>
     </form>
   )
 }
@@ -262,18 +272,19 @@ function StageRow({
     (stage.status === 'in_progress' || stage.status === 'changes_requested')
   const ready = document && document.last_version_number > 0
   return (
-    <li>
-      <div className={w.row}>
-        <h3>
-          {stage.position}. {stage.name}
-        </h3>
+    <li data-status={stage.status}>
+      <span className={styles.step} aria-hidden="true">
+        {stage.position}
+      </span>
+      <div className={styles.stageHeader}>
+        <h3>{stage.name}</h3>
+        <time className={styles.stageDue} dateTime={stage.due_date}>
+          {date(stage.due_date)}
+          {stage.is_overdue && <span>Просрочено</span>}
+        </time>
         <Chip tone={tone}>{label}</Chip>
       </div>
-      <p className={w.muted}>
-        До {date(stage.due_date)}
-        {stage.is_overdue ? ' · Просрочено' : ''}
-      </p>
-      <div className={w.actions}>
+      <div className={`${w.actions} ${styles.stageActions}`}>
         {stage.submitted_version_id && (
           <Link
             to={`/works/${thesis.id}/versions/${stage.submitted_version_id}?stage=${stage.id}`}
@@ -329,7 +340,9 @@ function StageRow({
         </Button>
       </div>
       {maySubmit && !ready && (
-        <small className={w.muted}>Загрузите DOCX, чтобы отправить этап.</small>
+        <small className={w.muted}>
+          Сохраните версию в редакторе или загрузите DOCX, чтобы отправить этап.
+        </small>
       )}
       <ErrorNotice error={mutation.error} />
       {canPlan && editing && (
@@ -346,15 +359,30 @@ function StageRow({
   )
 }
 
-export function ThesisPage({ role }: { role: User['role'] }) {
+export function ThesisPage({
+  role,
+  reviews = false,
+}: {
+  role: User['role']
+  reviews?: boolean
+}) {
   const { thesisId = '' } = useParams()
-  return <ThesisDetail key={thesisId} thesisId={thesisId} role={role} />
+  return (
+    <ThesisDetail
+      key={thesisId}
+      thesisId={thesisId}
+      role={role}
+      reviews={reviews}
+    />
+  )
 }
 
 function ThesisDetail({
   thesisId,
   role,
+  reviews,
 }: {
+  reviews: boolean
   thesisId: string
   role: User['role']
 }) {
@@ -362,6 +390,11 @@ function ThesisDetail({
   const plan = useApi<StagePlan>(`/theses/${thesisId}/stages`, !!thesis.data)
   const doc = useDocument(thesisId, !!thesis.data)
   const student = role === 'student'
+  const [stageFilter, setStageFilter] = useState<Stage['status'] | ''>('')
+  const stages = plan.data?.items
+  const filteredStages = stages?.filter(
+    ({ status }) => !stageFilter || status === stageFilter,
+  )
   const locked =
     plan.data?.items.some((stage) => stage.status === 'in_review') ?? false
   const canPlan =
@@ -369,78 +402,145 @@ function ThesisDetail({
     !locked &&
     !plan.data?.items.some((stage) => stage.status === 'completed')
   return (
-    <div className={w.page}>
-      <header className={w.heading}>
-        <div>
-          <Link to="/works">{student ? 'Моя ВКР' : 'Выпускные работы'}</Link>
-          <h1>{thesis.data?.title ?? 'Выпускная работа'}</h1>
-          {thesis.data && (
-            <p className={w.subheading}>
-              {date(thesis.data.start_date)} — {date(thesis.data.due_date)}
-            </p>
-          )}
-        </div>
-        {thesis.data && <Progress thesis={thesis.data} />}
-      </header>
-      <ErrorNotice error={thesis.error} />
-      {thesis.isPending && <Notice>Загружаем ВКР…</Notice>}
-      {thesis.data && (
-        <div className={w.columns}>
-          <div className={w.stack}>
-            <Panel title="Этапы ВКР">
-              <ErrorNotice error={plan.error} />
-              {plan.isPending && <Notice>Загружаем этапы…</Notice>}
-              {plan.data && (
-                <>
-                  {!plan.data.items.length && (
-                    <p>
-                      {student
-                        ? 'Руководитель ещё не добавил этапы.'
-                        : 'Добавьте первый обязательный этап.'}
-                    </p>
+    <>
+      <div className={w.page}>
+        {reviews ? (
+          <h1>Проверки</h1>
+        ) : student && thesis.data ? (
+          <StudentOverview thesis={thesis.data} stages={stages} />
+        ) : (
+          <header className={w.heading}>
+            <div>
+              {!student && <Link to="/works">Выпускные работы</Link>}
+              <h1>
+                {thesis.data?.title ??
+                  (student ? 'Выпускная работа' : 'Работа студента')}
+              </h1>
+              {thesis.data && (
+                <div className={styles.headingActions}>
+                  <div className={styles.deadline}>
+                    <span>Срок</span>
+                    <time dateTime={thesis.data.due_date}>
+                      {date(thesis.data.due_date)}
+                    </time>
+                  </div>
+                  <div className={styles.deadline}>
+                    <span>Начало работы</span>
+                    <time dateTime={thesis.data.start_date}>
+                      {date(thesis.data.start_date)}
+                    </time>
+                  </div>
+                  {thesis.data.is_overdue && (
+                    <Chip tone="orange">Просрочено</Chip>
                   )}
-                  <ol className={w.timeline}>
-                    {plan.data.items.map((stage) => (
-                      <StageRow
-                        key={stage.id}
-                        stage={stage}
-                        thesis={thesis.data}
-                        plan={plan.data}
-                        canPlan={canPlan}
-                        student={student}
-                        document={doc.data ?? null}
-                      />
-                    ))}
-                  </ol>
-                  {!student && !canPlan && (
-                    <p className={w.muted}>
-                      План закреплён, пока есть этапы на проверке или
-                      завершённые этапы.
-                    </p>
-                  )}
-                </>
+                </div>
               )}
-            </Panel>
-            {canPlan && plan.data && (
-              <Panel title="Новый этап">
-                <StageForm thesis={thesis.data} plan={plan.data} />
+            </div>
+            {thesis.data && <Progress thesis={thesis.data} />}
+          </header>
+        )}
+        <ErrorNotice error={thesis.error} />
+        {thesis.isPending && <Notice>Загружаем ВКР…</Notice>}
+        {thesis.data && (
+          <div className={student ? dashboard.sections : w.columns}>
+            <div id={student ? 'stages' : undefined} className={w.stack}>
+              <Panel
+                title="Этапы ВКР"
+                action={
+                  !!stages?.length && (
+                    <select
+                      aria-label="Статус этапов"
+                      className={styles.stageFilter}
+                      value={stageFilter}
+                      onChange={(event) =>
+                        setStageFilter(
+                          event.target.value as Stage['status'] | '',
+                        )
+                      }
+                    >
+                      <option value="">Все статусы</option>
+                      <option value="in_progress">В работе</option>
+                      <option value="in_review">На проверке</option>
+                      <option value="changes_requested">Нужны правки</option>
+                      <option value="completed">Подтверждённые</option>
+                    </select>
+                  )
+                }
+              >
+                <ErrorNotice error={plan.error} />
+                {plan.isPending && <Notice>Загружаем этапы…</Notice>}
+                {plan.data && (
+                  <>
+                    {!plan.data.items.length && (
+                      <p>
+                        {student
+                          ? 'Руководитель ещё не добавил этапы.'
+                          : 'Добавьте первый обязательный этап.'}
+                      </p>
+                    )}
+                    {!!stages?.length && !filteredStages?.length && (
+                      <p>Этапов с выбранным статусом пока нет.</p>
+                    )}
+                    {!!filteredStages?.length && (
+                      <div className={styles.stageColumns} aria-hidden="true">
+                        <span>Этап</span>
+                        <span>Срок</span>
+                        <span>Статус</span>
+                      </div>
+                    )}
+                    <ol className={styles.stages} role="list">
+                      {filteredStages?.map((stage) => (
+                        <StageRow
+                          key={stage.id}
+                          stage={stage}
+                          thesis={thesis.data}
+                          plan={plan.data}
+                          canPlan={canPlan}
+                          student={student}
+                          document={doc.data ?? null}
+                        />
+                      ))}
+                    </ol>
+                    {!student && !canPlan && (
+                      <p className={w.muted}>
+                        План закреплён, пока есть этапы на проверке или
+                        завершённые этапы.
+                      </p>
+                    )}
+                  </>
+                )}
               </Panel>
+              {canPlan && plan.data && (
+                <Panel title="Новый этап">
+                  <StageForm thesis={thesis.data} plan={plan.data} />
+                </Panel>
+              )}
+            </div>
+            {!reviews && (
+              <div id={student ? 'document' : undefined} className={w.stack}>
+                <ErrorNotice error={doc.error} />
+                {doc.isPending && <Notice>Загружаем документ…</Notice>}
+                {doc.data !== undefined && (
+                  <DocumentPanel
+                    thesisId={thesisId}
+                    document={doc.data}
+                    canEdit={student}
+                    locked={locked || !plan.data}
+                  />
+                )}
+                {student && doc.data && (
+                  <ImportHistory documentId={doc.data.id} thesisId={thesisId} />
+                )}
+              </div>
+            )}
+            {student && doc.data && (
+              <div id="versions">
+                <VersionList document={doc.data} />
+              </div>
             )}
           </div>
-          <div className={w.stack}>
-            <ErrorNotice error={doc.error} />
-            {doc.isPending && <Notice>Загружаем документ…</Notice>}
-            {doc.data !== undefined && (
-              <DocumentPanel
-                thesisId={thesisId}
-                document={doc.data}
-                canEdit={student}
-                locked={locked || !plan.data}
-              />
-            )}
-          </div>
-        </div>
-      )}
-    </div>
+        )}
+      </div>
+    </>
   )
 }

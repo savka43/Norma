@@ -1,72 +1,62 @@
-.layout {
+.page {
   min-height: 100dvh;
-  display: grid;
-  grid-template-columns: minmax(18rem, 3fr) minmax(23rem, 2fr);
+  padding-bottom: 32px;
 }
-.intro {
-  background: var(--ink);
-  color: #f2f7fc;
-  padding: clamp(2rem, 6vw, 7rem);
+.header {
   display: flex;
-  flex-direction: column;
-  justify-content: center;
+  align-items: center;
+  min-height: var(--header-height);
+  background: var(--color-header);
+  color: var(--color-header-text);
+  padding-inline: var(--gutter);
 }
-.intro p {
-  max-width: 29ch;
-  color: #c2d2e1;
+.layout {
+  width: min(420px, calc(100% - 2 * var(--gutter)));
+  margin: clamp(24px, 6vw, 64px) auto 0;
+  padding: 20px;
+  background: var(--surface);
+  border: 1px solid var(--line);
 }
-.brand {
-  font-family: var(--display);
-  font-size: 1.6rem;
-  margin-bottom: clamp(2rem, 10vh, 7rem);
-}
-.intro h1 {
-  max-width: 12ch;
-  font: 400 clamp(2.8rem, 6vw, 6.25rem)/0.99 var(--display);
-  letter-spacing: -0.04em;
-}
-.intro h1::after {
-  content: '';
-  display: block;
-  width: 4.5rem;
-  margin: 1.15rem 0;
-  border-top: 3px solid #ed9b78;
-}
-.side {
-  display: grid;
-  align-content: center;
-  padding: clamp(1.4rem, 5vw, 5rem);
-}
-.side h2 {
-  font: 400 clamp(1.85rem, 3.5vw, 2.7rem)/1.1 var(--display);
+.layout h1 {
+  margin: 0 0 20px;
 }
 .form {
   display: grid;
-  gap: 1rem;
-  margin: 1.35rem 0 1rem;
-  max-width: 27rem;
+  gap: 12px;
 }
-.form button {
-  justify-self: start;
+.form input {
+  height: var(--control-lg);
 }
-@media (max-width: 700px) {
-  .layout {
-    grid-template-columns: 1fr;
-  }
-  .intro {
-    padding: 1.5rem;
-  }
-  .brand {
-    display: none;
-  }
-  .intro h1 {
-    max-width: none;
-    font-size: 2.2rem;
-  }
-  .intro h1::after {
-    margin: 0.7rem 0;
-  }
-  .side {
-    padding: 1.5rem;
-  }
+.form > button {
+  margin-top: 4px;
+}
+.show {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+}
+.show input {
+  margin: 0;
+  width: 16px;
+  height: 16px;
+}
+.alternate {
+  margin-top: 16px;
+}
+.recovery {
+  margin-top: 12px;
+}
+.recovery summary {
+  width: fit-content;
+  color: var(--blue);
+}
+.recovery p {
+  margin: 8px 0 0;
+}
+.form input[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+.form label:has(input[aria-invalid='true']) small {
+  color: var(--danger);
 }

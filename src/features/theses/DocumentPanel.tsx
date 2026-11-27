@@ -8,8 +8,6 @@ import type {
   Document,
   ImportResult,
   Page,
-  Template,
-  TemplateVersion,
   VersionSummary,
 } from '../../shared/api/types'
 import {
@@ -21,21 +19,16 @@ import {
   Panel,
 } from '../../shared/ui/Ui'
 import w from '../../shared/ui/Workspace.module.css'
-import { DOCX, withLease } from './documents'
+import { DocumentFormatting } from '../formatting/DocumentFormatting'
+import { TemplatePicker, useTemplatePicker } from '../formatting/TemplatePicker'
+import { DOCX, versionListPath, versionPageSize, withLease } from './documents'
+import { ImportHistory } from './ImportHistory'
+import styles from './ThesisPage.module.css'
 
 function CreateDocument({ thesisId }: { thesisId: string }) {
   const client = useQueryClient()
-  const [offset, setOffset] = useState(0)
-  const [selected, setSelected] = useState('')
-  const limit = 25
-  const templates = useApi<Page<Template>>(
-    `/formatting-templates?limit=${limit}&offset=${offset}`,
-  )
-  const versions = useApi<Page<TemplateVersion>>(
-    `/formatting-templates/${selected}/versions?limit=1`,
-    !!selected,
-  )
-  const version = versions.data?.items[0]
+  const picker = useTemplatePicker(true)
+  const version = picker.version
   const create = useMutation({
     mutationFn: (template_version_id: string) =>
       send<Document>(`/theses/${thesisId}/document`, {
@@ -47,43 +40,8 @@ function CreateDocument({ thesisId }: { thesisId: string }) {
   })
   return (
     <div className={w.stack}>
-      <ErrorNotice error={templates.error ?? versions.error ?? create.error} />
-      {templates.isPending && <Notice>Загружаем шаблоны…</Notice>}
-      {templates.data && (
-        <>
-          {templates.data.items.length ? (
-            <label className={w.label}>
-              Шаблон оформления
-              <select
-                value={selected}
-                onChange={(event) => setSelected(event.target.value)}
-              >
-                <option value="">Выберите шаблон</option>
-                {templates.data.items.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : (
-            <p>
-              {offset
-                ? 'На этой странице нет шаблонов.'
-                : 'Попросите руководителя добавить шаблон оформления.'}
-            </p>
-          )}
-          <Pager
-            limit={limit}
-            offset={offset}
-            size={templates.data.items.length}
-            onChange={(next) => {
-              setOffset(next)
-              setSelected('')
-            }}
-          />
-        </>
-      )}
+      <ErrorNotice error={create.error} />
+      <TemplatePicker picker={picker} />
       <div>
         <Button
           disabled={!version || create.isPending}
@@ -115,7 +73,11 @@ function UploadDocx({ document }: { document: Document }) {
       ),
     onSuccess: ({ document: saved }) => {
       client.setQueryData([`/theses/${document.thesis_id}/document`], saved)
-      return invalidatePaths(client, `/documents/${document.id}/versions`)
+      return invalidatePaths(
+        client,
+        `/documents/${document.id}/versions`,
+        `/documents/${document.id}/imports`,
+      )
     },
   })
   const form = useForm({
@@ -133,7 +95,7 @@ function UploadDocx({ document }: { document: Document }) {
   })
   return (
     <form
-      className={w.form}
+      className={`${w.form} ${styles.upload}`}
       onReset={() => form.reset()}
       onSubmit={(event) => {
         event.preventDefault()
@@ -184,17 +146,10 @@ function UploadDocx({ document }: { document: Document }) {
   )
 }
 
-function VersionList({
-  documentId,
-  thesisId,
-}: {
-  documentId: string
-  thesisId: string
-}) {
+export function VersionList({ document }: { document: Document }) {
   const [offset, setOffset] = useState(0)
-  const limit = 15
   const versions = useApi<Page<VersionSummary>>(
-    `/documents/${documentId}/versions?limit=${limit}&offset=${offset}`,
+    versionListPath(document.id, offset),
   )
   return (
     <Panel title="Версии документа">
@@ -212,7 +167,9 @@ function VersionList({
           <ul className={w.list}>
             {versions.data.items.map((version) => (
               <li key={version.id} className={w.row}>
-                <Link to={`/works/${thesisId}/versions/${version.id}`}>
+                <Link
+                  to={`/works/${document.thesis_id}/versions/${version.id}`}
+                >
                   Версия №{version.number}
                 </Link>
                 <small>{date(version.created_at)}</small>
@@ -221,7 +178,7 @@ function VersionList({
           </ul>
           <Pager
             offset={offset}
-            limit={limit}
+            limit={versionPageSize}
             size={versions.data.items.length}
             onChange={setOffset}
           />
@@ -252,24 +209,27 @@ export function DocumentPanel({
         )}
       </Panel>
     )
+  if (!canEdit)
+    return (
+      <div className={w.stack}>
+        <VersionList document={document} />
+        <ImportHistory documentId={document.id} thesisId={document.thesis_id} />
+      </div>
+    )
+
   return (
     <div className={w.stack}>
-      {canEdit && (
-        <Panel
-          title="Рабочий документ"
-          action={<Link to={`/works/${thesisId}/edit`}>Открыть редактор</Link>}
-        >
-          {locked ? (
-            <p>
-              Документ на проверке. Загрузка доступна после решения по всем
-              отправленным этапам.
-            </p>
-          ) : (
-            <UploadDocx document={document} />
-          )}
-        </Panel>
-      )}
-      <VersionList documentId={document.id} thesisId={thesisId} />
+      <Panel title="Рабочий документ">
+        {locked ? (
+          <p>
+            Документ на проверке. Загрузка доступна после решения по всем
+            отправленным этапам.
+          </p>
+        ) : (
+          <UploadDocx document={document} />
+        )}
+      </Panel>
+      <DocumentFormatting document={document} />
     </div>
   )
 }

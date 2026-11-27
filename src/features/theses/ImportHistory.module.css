@@ -1,0 +1,17 @@
+.download {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.6rem;
+  align-items: baseline;
+  margin-top: 0.35rem;
+}
+
+.warnings {
+  margin: 0;
+  padding-inline-start: 1.3rem;
+  color: var(--muted);
+}
+
+.warnings li + li {
+  margin-top: 0.3rem;
+}

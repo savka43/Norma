@@ -4,6 +4,12 @@ import type { Document, Lease } from '../../shared/api/types'
 export const DOCX =
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 
+export const versionPageSize = 15
+
+export function versionListPath(documentId: string, offset = 0) {
+  return `/documents/${documentId}/versions?limit=${versionPageSize}&offset=${offset}`
+}
+
 export async function getDocument(
   thesisId: string,
   signal: AbortSignal,

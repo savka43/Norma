@@ -1,0 +1,193 @@
+.headingActions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.8rem clamp(1rem, 2.55vw, 2rem);
+  margin-top: 0.85rem;
+}
+
+.deadline {
+  display: flex;
+  flex-direction: column;
+  align-items: start;
+  gap: 0.12rem;
+  font-size: 0.94rem;
+}
+
+.deadline span {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.deadline time {
+  font-weight: 660;
+}
+
+.empty {
+  padding: 20px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+.empty h1 {
+  margin: 0 0 12px;
+}
+.empty p {
+  max-width: 52ch;
+  color: var(--muted);
+}
+.empty button {
+  margin-top: 1rem;
+}
+
+.stages {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.stages > li {
+  position: relative;
+  overflow-wrap: anywhere;
+  padding: 0.7rem 0 0.7rem 2.35rem;
+}
+
+.stages > li + li {
+  border-top: 1px solid var(--line);
+}
+
+.stageHeader,
+.stageColumns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(6rem, 8.25rem) 7.15rem;
+  align-items: center;
+  gap: 0.35rem 0.8rem;
+}
+
+.stageHeader > :last-child,
+.stageColumns > :last-child {
+  justify-self: end;
+}
+
+.stageColumns {
+  padding: 0 0 0.4rem 2.35rem;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.stageDue {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.stageDue span {
+  display: block;
+  color: var(--danger);
+}
+
+.stageActions {
+  margin-top: 0.15rem;
+  font-size: 0.88rem;
+}
+
+.stageFilter {
+  min-width: 0;
+  max-width: 100%;
+  font-size: 0.88rem;
+}
+
+.step {
+  position: absolute;
+  inset-block-start: 0.65rem;
+  inset-inline-start: 0;
+  display: grid;
+  place-items: center;
+  inline-size: 1.65rem;
+  block-size: 1.65rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 0;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 680;
+}
+
+.stages li[data-status='completed'] > .step {
+  background: var(--green);
+  color: var(--surface);
+  border-color: var(--green);
+}
+
+.stages li[data-status='in_review'] > .step {
+  background: var(--blue-tint);
+  color: var(--blue-hover);
+  border-color: var(--color-control-border);
+}
+
+.stages li[data-status='changes_requested'] > .step {
+  background: var(--danger-tint);
+  color: var(--danger);
+  border-color: var(--color-control-border);
+}
+
+.stages h3 {
+  margin: 0;
+  font-size: 1.03rem;
+}
+
+.stages p {
+  margin: 0.3rem 0 0.55rem;
+}
+
+.upload input[type='file'] {
+  width: 100%;
+  padding: 0.3rem;
+}
+
+.upload input::file-selector-button {
+  padding: 0.37rem 0.7rem;
+  margin-inline-end: 0.5rem;
+  border: 0;
+  border-radius: 0;
+  background: var(--mint);
+  color: var(--green-deep);
+  cursor: pointer;
+}
+
+@media (max-width: 620px) {
+  .stageHeader {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .stageColumns {
+    display: none;
+  }
+
+  .stageHeader h3 {
+    grid-column: 1 / -1;
+    font-size: 0.95rem;
+  }
+
+  .stageHeader > :last-child {
+    justify-self: start;
+  }
+}
+
+.stageFields {
+  display: grid;
+  gap: 0.9rem;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.stageFields button {
+  justify-self: start;
+}
+
+@media (max-width: 380px) {
+  .stageHeader {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -26,10 +26,14 @@ const details: Record<string, string> = {
     'Проверка заимствований отключена в этом окружении.',
   'Document is locked while a stage is in review':
     'Документ на проверке. Дождитесь решения руководителя.',
+  'Document template is locked while a chapter is in review':
+    'Глава на проверке. Изменить шаблон можно после решения руководителя.',
   'Document changes affect a chapter in review':
     'Правки затронули главу на проверке. Верните её исходный текст и сохраните документ снова.',
   'Document revision conflict':
     'На сервере уже есть более свежий документ. Перечитайте его, чтобы восстановить черновик.',
+  'Template version conflict':
+    'У шаблона уже опубликована более свежая версия. Загрузите её, чтобы продолжить.',
   'Stage plan is locked during or after review':
     'План закреплён, пока есть этапы на проверке или завершённые этапы.',
   'Stage deadline outside thesis dates':

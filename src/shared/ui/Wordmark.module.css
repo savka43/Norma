@@ -1,0 +1,6 @@
+.wordmark {
+  color: inherit;
+  font-size: var(--text-page);
+  font-weight: 500;
+  line-height: var(--leading-page);
+}
